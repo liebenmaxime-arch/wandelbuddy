@@ -178,12 +178,17 @@ async function reminders(env, c, now, vapid, budget) {
   for (const a of today) {
     const left = toMin(a.time) - now.min;
     if (left <= 0 || left > 10) continue;
-    if (!(await claim(env, c, 'r_' + a.id))) continue;
+    // elke deelnemer krijgt zijn eigen herinnering (ook wie pas later op "Doe mee" tikt), maar maar één keer
     const pids = new Set((await query(env, c, 'joins', 'act', 'EQUAL', a.id)).map((j) => j.uid));
-    const subs = (await listDocs(env, `/companies/${c}/push`)).filter((s) => pids.has(s.pid));
-    if (!subs.length) continue;
+    if (!pids.size) continue;
+    const all = await listDocs(env, `/companies/${c}/push`);
     const msg = { title: `Over ${left} ${left === 1 ? 'minuut' : 'minuten'}: ${labelOf(a).toLowerCase()}`, body: `Om ${hhmm(a.time)} · vertrek aan ${a.place}`, tag: 'r' + a.id, url: `./#a=${a.id}` };
-    sent += await deliver(env, c, subs, msg, vapid, budget);
+    for (const pid of pids) {
+      const subs = all.filter((s) => s.pid === pid); if (!subs.length) continue;
+      if (!(await claim(env, c, `r_${a.id}_${pid}`))) continue;
+      budget.log.push({ c, stap: 'herinnering', act: a.id, minuten: left });
+      sent += await deliver(env, c, subs, msg, vapid, budget);
+    }
   }
   return sent;
 }
@@ -205,26 +210,39 @@ async function run(env, onlyCompany) {
 
 const lastRun = new Map();
 const cors = { 'Access-Control-Allow-Origin': '*', 'Content-Type': 'application/json' };
+// bijhouden wanneer de minuutcontrole (Cron Trigger) voor het laatst liep, zodat /status dat kan tonen
+async function markCron(env, info) {
+  try { await fs(env, '/config/pushworker', { method: 'PATCH', body: JSON.stringify({ fields: { lastCron: { integerValue: String(Date.now()) }, lastResult: { stringValue: String(info).slice(0, 200) } } }) }); } catch (e) {}
+}
 export default {
   // elke minuut (Cron Trigger "* * * * *"); 's nachts doet hij niets
   async scheduled(event, env, ctx) {
     const h = nowBE().hour; if (h < 6 || h >= 21) return;
-    ctx.waitUntil(run(env).then((r) => console.log('klaar', JSON.stringify(r))).catch((e) => console.log('fout', String(e))));
+    ctx.waitUntil(run(env)
+      .then((r) => markCron(env, `${r.sent} verstuurd, ${r.companies} bedrijven`))
+      .catch((e) => markCron(env, 'fout: ' + String(e))));
   },
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === '/run') { // seintje van de app net na het plannen
       const c = (url.searchParams.get('c') || '').replace(/[^a-z0-9]/g, '').slice(0, 60);
       if (!c) return new Response('{"ok":false}', { status: 400, headers: cors });
       if (Date.now() - (lastRun.get(c) || 0) < 5000) return new Response('{"ok":true,"skip":true}', { headers: cors });
       lastRun.set(c, Date.now());
-      try { const r = await run(env, c); return new Response(JSON.stringify({ ok: true, ...r }), { headers: cors }); }
+      const job = run(env, c);
+      ctx.waitUntil(job.catch(() => {})); // ook afwerken als de app de verbinding al verbrak
+      try { const r = await job; return new Response(JSON.stringify({ ok: true, ...r }), { headers: cors }); }
       catch (e) { return new Response(JSON.stringify({ ok: false, error: String(e) }), { status: 500, headers: cors }); }
     }
-    if (url.pathname === '/status') { // controle: staan de geheimen goed?
+    if (url.pathname === '/status') { // controle: staan de geheimen goed, en loopt de minuutcontrole?
       const out = { ok: true, tijd: nowBE() };
       try { await makeVapid(env.VAPID_PRIVATE_JWK); out.vapid = 'in orde'; } catch (e) { out.vapid = 'ontbreekt of fout'; out.ok = false; }
       try { await robotToken(env); out.robot = 'in orde'; } catch (e) { out.robot = String(e.message || e); out.ok = false; }
+      try {
+        const m = await getDoc(env, '/config/pushworker');
+        if (m && m.lastCron) { const ago = Math.round((Date.now() - m.lastCron) / 60000); out.minuutcontrole = ago <= 2 ? `loopt (laatst ${ago} min geleden: ${m.lastResult})` : `laatst ${ago} min geleden (staat de Cron Trigger aan? 's nachts rust hij)`; }
+        else out.minuutcontrole = 'nog nooit gelopen: zet de Cron Trigger "* * * * *" aan';
+      } catch (e) { out.minuutcontrole = 'onbekend'; }
       return new Response(JSON.stringify(out, null, 2), { headers: cors });
     }
     return new Response('Wandelbuddy pushmeldingen. Alles in orde.', { headers: { 'Content-Type': 'text/plain; charset=utf-8' } });

@@ -51,13 +51,14 @@ Webapp waarin collega's een middagwandeling of andere activiteit plannen. Andere
 
 ## Pushmeldingen (deel F)
 - Web Push met VAPID. Publieke sleutel + Worker-adres in `push-config.js`. Private sleutel staat alleen in `~/Desktop/wandelbuddy-geheimen/` (buiten de repo) en als geheim `VAPID_PRIVATE_JWK` in de Cloudflare Worker.
-- Cloudflare Worker `wandelbuddy-push` (https://wandelbuddy-push.liebenmaxime.workers.dev), code in `push-worker/worker.js`. Maxime plakt die code zelf in Cloudflare (Edit code → Deploy). Cron Trigger elke minuut; werkt alleen van 6 tot 21 uur (Brussel).
+- Cloudflare Worker `wandelbuddy-push` (https://wandelbuddy-push.liebenmaxime.workers.dev), code in `push-worker/worker.js`. Maxime plakt die code zelf in Cloudflare (Edit code → Cmd+A → plakken → Deploy). **Laat Maxime altijd kopiëren uit TextEdit (open het bestand met `open -a TextEdit`), niet uit de chat**: bij kopiëren uit de chat raakte de API-sleutel beschadigd. Cron Trigger "Every minute" staat aan (Settings → Trigger events, daarna Save); de Worker werkt alleen van 6 tot 21 uur (Brussel). `/status` toont of de minuutcontrole loopt (laatste run in `config/pushworker`).
 - De Worker leest Firestore als `robot@wandelbuddy-9c08c.firebaseapp.com` (in `admins` met company "*"); wachtwoord als geheim `ROBOT_PASSWORD`. Cloudflare-geheimen wijzigen: Settings → Variables and Secrets → Edit → **Rotate** → nieuwe waarde → Deploy.
 - `/status` op de Worker toont of beide geheimen werken. `/run?c=<bedrijf>` wordt door de app aangeroepen na het plannen.
 - Meldingsadressen: `companies/{c}/push/{id}`; verzendlogboek: `companies/{c}/pushlog/{n_|r_}<activiteit>`.
 - iPhone: alleen vanaf iOS 16.4 en vanuit de app op het beginscherm.
 - Getest op 18 nov 2026: melding "nieuwe activiteit" komt aan op Maximes iPhone (Apple antwoordt 201). `/run?c=<bedrijf>` geeft een verslag (`log`) met aantallen en de status van Apple/Google; handig bij problemen.
-- Nog op te ruimen met de hoofdcode: bedrijf "Testbedrijf Claude" (Test Een, Test Collega + 2 activiteiten) en het testprofiel "Test Collega" bij Uhasselt. Maxime zelf zit bij Uhasselt.
+- Herinneringen: elke deelnemer krijgt zijn eigen herinnering (pushlog `r_<activiteit>_<profiel>`), ook wie pas later meedoet.
+- Eindtest gedaan op 18–19 nov 2026; alle testgegevens zijn opgeruimd. Enige bedrijf nu: Uhasselt met Maxime Lieben. Nog niet getest op de telefoon: de herinnering 10 min vooraf (minuutcontrole draaide toen nog niet).
 
 ## Beheerders (managementdashboard)
 - Knop "Management" in het tabblad Samen → beheerderscode. De code is het wachtwoord van een Firebase Auth e-mail/wachtwoord-account. De app gebruikt een aparte Firebase-app "beheer" voor die sessie.
