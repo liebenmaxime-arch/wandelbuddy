@@ -29,12 +29,17 @@
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html, body { height: 100%; }
-body { background: var(--bg); color: var(--ink); font-family: var(--font); font-size: 15px; }
+/* telefoon: de pagina mag niet opzij schuiven en niet "verend" meebewegen; de balken blijven op hun plek */
+html { overflow-x: hidden; overscroll-behavior: none; }
+body { overscroll-behavior: none; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font); font-size: 15px; touch-action: manipulation; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 button, input { font: inherit; color: inherit; }
+/* iPhone zoomt automatisch in bij tekstvakken kleiner dan 16px; daarna staat de pagina scheef */
+input, textarea, select { font-size: 16px; }
 button { cursor: pointer; }
 button:focus-visible, input:focus-visible { outline: 2px solid var(--orange); outline-offset: 2px; }
 .app { max-width: 520px; margin: 0 auto; min-height: 100%; background: var(--surface); display: flex; flex-direction: column; position: relative; }
-.main { flex: 1; padding-block: 18px 110px; padding-left: max(18px, env(safe-area-inset-left, 0px)); padding-right: max(18px, env(safe-area-inset-right, 0px)); display: flex; flex-direction: column; gap: 16px; }
+.main { flex: 1; padding-block: calc(18px + env(safe-area-inset-top, 0px)) calc(110px + env(safe-area-inset-bottom, 0px)); min-width: 0; padding-left: max(18px, env(safe-area-inset-left, 0px)); padding-right: max(18px, env(safe-area-inset-right, 0px)); display: flex; flex-direction: column; gap: 16px; }
 .eyebrow { font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
 h1 { font-size: 26px; font-weight: 800; margin: 2px 0 0; letter-spacing: -.01em; text-wrap: balance; }
 h2 { font-size: 15px; font-weight: 800; margin: 6px 0 0; }
@@ -157,7 +162,7 @@ label.pill { cursor: pointer; display: inline-block; }
 
 /* ---------- extra ---------- */
 body { margin: 0; -webkit-tap-highlight-color: transparent; }
-:root { padding-top: env(safe-area-inset-top, 0px); }
+.app { overflow-x: clip; width: 100%; }
 .linkbtn { border: 0; background: transparent; color: var(--green); font-weight: 800; padding: 0; text-decoration: underline; text-underline-offset: 3px; }
 .me-row { display: flex; align-items: center; gap: 10px; background: var(--surface-2); border-radius: 14px; padding: 10px 12px; }
 .me-row .grow { flex: 1; min-width: 0; }

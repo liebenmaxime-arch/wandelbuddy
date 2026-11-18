@@ -89,7 +89,7 @@ async function sendPush(sub, message, vapid) {
     headers: { 'Content-Encoding': 'aes128gcm', 'Content-Type': 'application/octet-stream', TTL: '3600', Urgency: 'high', Authorization: await vapidAuth(sub.endpoint, vapid) },
     body,
   });
-  return res.status;
+  return { status: res.status, text: await res.text().catch(() => '') };
 }
 
 // ---------- database (Firestore REST, als robot-beheerder) ----------
@@ -141,14 +141,14 @@ async function deliver(env, c, subs, message, vapid, budget) {
   let sent = 0;
   for (const s of subs) {
     if (budget.left <= 0) break;
-    if (!s.endpoint || !s.p256dh || !s.auth) continue;
+    if (!s.endpoint || !s.p256dh || !s.auth) { budget.log.push({ c, stap: 'adres onvolledig' }); continue; }
     budget.left--;
     try {
-      const st = await sendPush(s, message, vapid);
-      if (st === 404 || st === 410) await fs(env, `/companies/${c}/push/${s.id}`, { method: 'DELETE' }); // toestel bestaat niet meer
-      else if (st < 300) sent++;
-      else console.log('push status', st, new URL(s.endpoint).host);
-    } catch (e) { console.log('push fout', String(e)); }
+      const { status, text } = await sendPush(s, message, vapid);
+      budget.log.push({ c, stap: 'verstuurd', dienst: new URL(s.endpoint).host, status, antwoord: text.slice(0, 120) });
+      if (status === 404 || status === 410) await fs(env, `/companies/${c}/push/${s.id}`, { method: 'DELETE' }); // toestel bestaat niet meer
+      else if (status < 300) sent++;
+    } catch (e) { budget.log.push({ c, stap: 'versturen mislukt', fout: String(e).slice(0, 120) }); }
   }
   return sent;
 }
@@ -157,11 +157,14 @@ const labelOf = (a) => a.label || LABELS[a.type] || 'Sporten';
 
 async function newActivities(env, c, now, vapid, budget) {
   const recent = await query(env, c, 'activities', 'createdAt', 'GREATER_THAN', Date.now() - 15 * 60000);
+  budget.log.push({ c, stap: 'nieuwe activiteiten', aantal: recent.length });
   let sent = 0;
   for (const a of recent) {
     if (a.date < now.date || (a.date === now.date && toMin(a.time) + (a.dur || 0) <= now.min)) continue; // al voorbij
-    if (!(await claim(env, c, 'n_' + a.id))) continue; // al gemeld
-    const subs = (await listDocs(env, `/companies/${c}/push`)).filter((s) => s.pid !== a.by);
+    if (!(await claim(env, c, 'n_' + a.id))) { budget.log.push({ c, stap: 'al gemeld', act: a.id }); continue; }
+    const all = await listDocs(env, `/companies/${c}/push`);
+    const subs = all.filter((s) => s.pid !== a.by);
+    budget.log.push({ c, stap: 'meldingsadressen', totaal: all.length, zonderOrganisator: subs.length });
     if (!subs.length) continue;
     const who = await nameOf(env, c, a.by);
     const msg = { title: `${who} gaat ${labelOf(a).toLowerCase()}`, body: `${dayLabel(a.date, now.date)} om ${hhmm(a.time)} · ${a.dur} min · vertrek: ${a.place}`, tag: a.id, url: `./#a=${a.id}` };
@@ -187,16 +190,17 @@ async function reminders(env, c, now, vapid, budget) {
 async function run(env, onlyCompany) {
   const now = nowBE();
   const vapid = await makeVapid(env.VAPID_PRIVATE_JWK);
-  const budget = { left: MAX_SENDS };
+  const budget = { left: MAX_SENDS, log: [] };
   const companies = onlyCompany ? [onlyCompany] : (await listDocs(env, '/companies')).map((x) => x.id);
   let sent = 0;
   for (const c of companies) {
     try {
       sent += await newActivities(env, c, now, vapid, budget);
       if (!onlyCompany) sent += await reminders(env, c, now, vapid, budget);
-    } catch (e) { console.log('bedrijf', c, String(e)); }
+    } catch (e) { budget.log.push({ c, stap: 'fout', fout: String(e).slice(0, 160) }); }
   }
-  return { sent, companies: companies.length };
+  for (const l of budget.log) console.log(JSON.stringify(l));
+  return { sent, companies: companies.length, log: budget.log };
 }
 
 const lastRun = new Map();

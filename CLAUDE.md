@@ -41,6 +41,8 @@ Webapp waarin collega's een middagwandeling of andere activiteit plannen. Andere
 - `/status` op de Worker toont of beide geheimen werken. `/run?c=<bedrijf>` wordt door de app aangeroepen na het plannen.
 - Meldingsadressen: `companies/{c}/push/{id}`; verzendlogboek: `companies/{c}/pushlog/{n_|r_}<activiteit>`.
 - iPhone: alleen vanaf iOS 16.4 en vanuit de app op het beginscherm.
+- Getest op 18 nov 2026: melding "nieuwe activiteit" komt aan op Maximes iPhone (Apple antwoordt 201). `/run?c=<bedrijf>` geeft een verslag (`log`) met aantallen en de status van Apple/Google; handig bij problemen.
+- Nog op te ruimen met de hoofdcode: bedrijf "Testbedrijf Claude" (Test Een, Test Collega + 2 activiteiten) en het testprofiel "Test Collega" bij Uhasselt. Maxime zelf zit bij Uhasselt.
 
 ## Beheerders (managementdashboard)
 - Knop "Management" in het tabblad Samen → beheerderscode. De code is het wachtwoord van een Firebase Auth e-mail/wachtwoord-account. De app gebruikt een aparte Firebase-app "beheer" voor die sessie.
