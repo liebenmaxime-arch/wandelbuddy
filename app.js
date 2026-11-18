@@ -300,9 +300,32 @@ document.addEventListener('visibilitychange', () => {
 });
 function trackOpen() { if (!S.me) return; S.lastOpen = Date.now(); store.track('open'); store.touch(); }
 
+// ---------- profielfoto ----------
+// Alleen een kleine JPEG als data-URL wordt getoond (andere tekst in de database wordt genegeerd).
+const photoOf = (u, src) => { const p = ((src || S.users)[u] || {}).photo; return typeof p === 'string' && p.length < 150000 && /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(p) ? p : null; };
+const face = (u, name, src) => { const p = photoOf(u, src); return p ? `<img src="${p}" alt="">` : esc(initials(name)); };
+async function handlePhoto(file) {
+  if (!file || !S.me) return;
+  toast('Foto verwerken…');
+  try {
+    const url = URL.createObjectURL(file);
+    const img = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = url; });
+    const w = img.naturalWidth, h = img.naturalHeight, s = Math.min(w, h);
+    const c = document.createElement('canvas'); c.width = c.height = 128;
+    const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, 128, 128);
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(img, (w - s) / 2, (h - s) / 2, s, s, 0, 0, 128, 128); // vierkant uit het midden
+    URL.revokeObjectURL(url);
+    let data = c.toDataURL('image/jpeg', 0.82);
+    if (data.length > 60000) data = c.toDataURL('image/jpeg', 0.6);
+    S.users[S.me] = { ...(S.users[S.me] || {}), photo: data }; render();
+    await store.profile({ photo: data }); toast('Foto opgeslagen.');
+  } catch (e) { console.error(e); toast('Deze foto lukt niet. Probeer een andere foto.'); }
+}
+
 // ---------- schermen ----------
 function avatars(uids) {
-  return `<span class="avs">${uids.slice(0, 4).map((u) => `<span style="background:${colorFor(u)}">${esc(initials(nameOf(u)))}</span>`).join('')}</span>`;
+  return `<span class="avs">${uids.slice(0, 4).map((u) => `<span style="background:${colorFor(u)}">${face(u, nameOf(u))}</span>`).join('')}</span>`;
 }
 function card(a) {
   const g = goingOf(a.id); const t = TYPES[a.type] || TYPES.wandelen; const joined = iJoined(a.id); const past = isPast(a);
@@ -338,7 +361,7 @@ function vWelcome() {
     return `<div class="welcome">
       <div class="logo">${ICON.wandelen}</div>
       <div><h1>Ben jij dit?</h1><p class="muted" style="margin-top:6px">Er bestaat al een profiel met deze naam bij dit bedrijf.</p></div>
-      <div class="me-row"><div class="av" style="background:${colorFor(pid)}">${esc(initials(u.name))}</div>
+      <div class="me-row"><div class="av" style="background:${colorFor(pid)}">${face(pid, u.name, S.pendingMembers)}</div>
         <div class="grow"><b>${esc(u.name || '')}</b><small class="muted" style="display:block">${info}</small></div></div>
       <button class="primary" type="button" data-act="claim-yes">Ja, dat ben ik</button>
       <button class="secondary" type="button" data-act="claim-no">Nee, ik ben iemand anders</button>
@@ -416,7 +439,7 @@ function vDetail() {
   const a = actById(S.detail); if (!a) { S.detail = null; return vAgenda(); }
   const t = TYPES[a.type] || TYPES.wandelen; const g = goingOf(a.id); const joined = iJoined(a.id); const past = isPast(a); const isMine = a.by === S.me;
   const max = a.max || t.max; const full = max && g.length >= max && !joined;
-  const ppl = g.map((j) => `<div class="person"><div class="av" style="background:${colorFor(j.uid)}">${esc(initials(nameOf(j.uid)))}</div><div><b>${esc(nameOf(j.uid))}</b><small>${j.uid === a.by ? 'organiseert' : 'doet mee'}${past && stepsOf(j) ? ' · ' + fmtN(stepsOf(j)) + ' stappen' : ''}</small></div></div>`).join('');
+  const ppl = g.map((j) => `<div class="person"><div class="av" style="background:${colorFor(j.uid)}">${face(j.uid, nameOf(j.uid))}</div><div><b>${esc(nameOf(j.uid))}</b><small>${j.uid === a.by ? 'organiseert' : 'doet mee'}${past && stepsOf(j) ? ' · ' + fmtN(stepsOf(j)) + ' stappen' : ''}</small></div></div>`).join('');
   let actions = '';
   if (!past) {
     if (isMine) actions = `<button class="secondary" type="button" data-act="share">Kopieer uitnodiging</button>`;
@@ -518,11 +541,15 @@ function vSamen() {
       <div class="stat"><b>${fmtN(m.stepsMonth)}</b><small>stappen</small></div>
       <div class="stat"><b>${m.mates.size}</b><small>collega's samen mee bewogen</small></div>
     </div>
+    <h2>Jouw profiel</h2>
+    <div class="me-row"><label class="av av-lg" style="background:${colorFor(S.me)}" for="photo-in">${face(S.me, realName(S.me))}</label>
+      <div class="grow"><b>${esc(realName(S.me))}</b><small class="muted" style="display:block">${esc(u.company || 'Geen bedrijf ingevuld')}</small></div>
+      <label class="pill in" for="photo-in" role="button">${photoOf(S.me) ? 'Foto wijzigen' : 'Foto toevoegen'}</label>
+      <input class="vh" type="file" id="photo-in" accept="image/*" aria-label="Profielfoto kiezen"></div>
+    <p class="note" style="margin-top:-8px">Je naam en bedrijf liggen vast. Je foto zien je collega's bij de activiteiten.</p>
     <h2>Jouw badges</h2>
     <div class="badges">${BADGES.map((b) => `<div class="badge ${earned[b.id] ? 'on' : ''}"><div class="medal">${medal}</div><div><b>${b.name}</b><span>${earned[b.id] ? 'Behaald' : b.how}</span></div></div>`).join('')}</div>
     <h2>Instellingen</h2>
-    <div class="me-row"><div class="av" style="background:${colorFor(S.me)}">${esc(initials(realName(S.me)))}</div>
-      <div class="grow"><b>${esc(realName(S.me))}</b><small class="muted" style="display:block">${esc(u.company || 'Geen bedrijf ingevuld')}</small></div></div>
     ${canNotif ? '<button class="secondary" type="button" data-act="notifperm">Meldingen ook tonen als de app op de achtergrond staat</button>' : ''}
     ${S.mode === 'local' ? '<button class="secondary" type="button" data-act="simulate">Simuleer: een collega plant een wandeling</button>' : ''}
     <button class="secondary" type="button" data-tab="dash">Managementdashboard bekijken</button>
@@ -637,7 +664,7 @@ function render(preserve = false) {
   const main = $('#main'); const key = viewKey();
   const keep = {}; let focusId = null, selS = null, selE = null; let openD = [];
   if (preserve && key === lastKey) {
-    main.querySelectorAll('input[id],textarea[id]').forEach((el) => { keep[el.id] = el.value; });
+    main.querySelectorAll('input[id]:not([type="file"]),textarea[id]').forEach((el) => { keep[el.id] = el.value; });
     openD = [...main.querySelectorAll('details[id]')].filter((d) => d.open).map((d) => d.id);
     const ae = document.activeElement; if (ae && ae.id && main.contains(ae)) { focusId = ae.id; try { selS = ae.selectionStart; selE = ae.selectionEnd; } catch (e) {} }
   }
@@ -751,7 +778,7 @@ document.addEventListener('input', (e) => {
   S.signup = { ...(S.signup || {}), [k]: e.target.value };
   if (k === 'company') { const sg = $('#sugg'); if (sg) sg.innerHTML = suggHtml(); }
 });
-document.addEventListener('change', (e) => { if ((e.target.id === 'ctime' || e.target.id === 'cplace') && S.draft) { readDraftInputs(); render(); } });
+document.addEventListener('change', (e) => { if (e.target.id === 'photo-in') { const f = e.target.files && e.target.files[0]; e.target.value = ''; handlePhoto(f); return; } if ((e.target.id === 'ctime' || e.target.id === 'cplace') && S.draft) { readDraftInputs(); render(); } });
 window.addEventListener('hashchange', () => { if (location.hash === '#dashboard') { S.tab = 'dash'; S.detail = null; S.draft = null; render(); } });
 // herinnering 10 minuten voor de start van iets waaraan je meedoet
 function checkReminders() {
