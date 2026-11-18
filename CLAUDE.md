@@ -23,7 +23,14 @@ Webapp waarin collega's een middagwandeling of andere activiteit plannen. Andere
 - Zonder geldige config valt de app terug op een lokale demo (localStorage).
 - Lokaal testen: `python3 -m http.server 8080` in de projectmap en open `http://127.0.0.1:8080/`. Let op: lokaal testen gebruikt de echte database. Maak testdata herkenbaar (bedrijf "Testbedrijf Claude") en houd ze zo klein mogelijk.
 - De huidige databaseregels laten NIET toe dat de app `users`, `events` of `views` verwijdert. Testdata daarin kan alleen via de Firebase-console weg (of later via een beheerdersaccount).
-- Aanmelden: profiel-id `u_…` staat in localStorage `wb-pid`; Firebase Anonymous Auth-uid's komen in `users/{id}.authUids`. Profielen worden herkend op `nameKey` (genormaliseerde voornaam+achternaam) en `companyKey` (genormaliseerd bedrijf, zie `norm()` in app.js).
+- Aanmelden: profiel-id `u_…` staat in localStorage `wb-pid`, bedrijfssleutel in `wb-ck`. Firebase Anonymous Auth staat aan (en Email/Password, voor de beheerders later). Profielen worden herkend op `nameKey` (genormaliseerde voornaam+achternaam) binnen het bedrijf; bedrijven op `companyKey` (zie `norm()` in app.js).
+- Per bedrijf een eigen map (nieuwe versie):
+  - `companies/{companyKey}` = { name, createdAt } (lijst met bedrijfsnamen, leesbaar voor elke aangemelde gebruiker)
+  - `companies/{companyKey}/auth/{firebase-uid}` = { pid, at } (dit toestel hoort bij dit bedrijf; vereist door de regels)
+  - `companies/{companyKey}/{activities|joins|users|views|events|config}` (alleen voor leden van dat bedrijf)
+  - De oude mappen bovenaan (`activities`, `users`, ...) horen bij de oude link en blijven ongewijzigd.
+- Databaseregels staan in `firestore.rules`. Na een wijziging moet Maxime ze zelf plakken in Firebase → Firestore → Rules → Publish.
+- Nog op te ruimen (kan pas met beheerdersrechten): bedrijven "Testbedrijf Claude" en "Testbedrijf Claude B" in `companies` (+ hun `auth`-kaartjes, en 1 gebruiker + events in B), en 4 testgebruikers "Test …" met events/views in de oude mappen bovenaan.
 
 ## Regels
 - Alles GRATIS: geen betaalplannen, geen kredietkaart, geen App Store of Google Play. Geen Firebase Cloud Functions, geen Firebase Storage.

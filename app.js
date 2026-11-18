@@ -78,12 +78,7 @@ async function signInAnon(Au, auth) {
 // Vergelijken zonder hoofdletters, spaties, leestekens of accenten: "U Hasselt" = "uhasselt".
 const norm = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
 const userNameKey = (u) => (u && (u.nameKey || norm(u.name))) || '';
-const userCompKey = (u) => (u && (u.companyKey || norm(u.company))) || '';
-function companies() {
-  const m = new Map();
-  for (const u of Object.values(S.users)) { const k = userCompKey(u); if (k && u.company && !m.has(k)) m.set(k, u.company.trim()); }
-  return [...m].map(([key, name]) => ({ key, name })).sort((a, b) => a.name.localeCompare(b.name, 'nl'));
-}
+const companies = () => (S.companies || []).slice().sort((a, b) => a.name.localeCompare(b.name, 'nl'));
 
 // ---------- sound ----------
 let audioCtx = null;
@@ -161,17 +156,31 @@ function localStore() {
 }
 
 // ---------- gedeelde store (Firebase Firestore) ----------
+// Elk bedrijf heeft een eigen map: companies/{bedrijf}/activities, joins, users, views, events, config.
+// companies/{bedrijf}/auth/{firebase-uid} zegt dat dit toestel bij dat bedrijf hoort (nodig voor de databaseregels).
+// De oude mappen bovenaan (activities, users, ...) blijven voor de oude link en worden hier niet gebruikt.
 function sharedStore(F, db) {
-  const { collection, doc, setDoc, deleteDoc, addDoc, onSnapshot, query, orderBy, limit, arrayUnion } = F;
+  const { collection, doc, setDoc, getDocs, deleteDoc, addDoc, onSnapshot, query, orderBy, limit, arrayUnion } = F;
   const authExtra = () => (S.authUid ? { authUids: arrayUnion(S.authUid) } : {});
-  const t0 = Date.now();
-  const timer = setTimeout(() => { if (!S.loadedActs) { S.offline = true; refresh(); } }, 10000);
+  let t0 = Date.now(); let timer = null; let ck = null; let stops = [];
+  const col = (n) => collection(db, 'companies', ck, n);
+  const dref = (n, id) => doc(db, 'companies', ck, n, id);
   const fail = (e) => { console.error(e); if (e && e.code === 'permission-denied') S.denied = true; S.offline = true; refresh(); };
-  const wrap = async (p) => { try { return await p; } catch (e) { console.error(e); toast(e && e.code === 'permission-denied' ? 'De database weigert dit. Kijk de regels in Firebase na (stap 4 van de uitleg).' : 'Dat lukte niet. Controleer je verbinding en probeer opnieuw.'); throw e; } };
+  const wrap = async (p) => { try { return await p; } catch (e) { console.error(e); toast(e && e.code === 'permission-denied' ? 'De database weigert dit. Vernieuw de pagina en probeer opnieuw.' : 'Dat lukte niet. Controleer je verbinding en probeer opnieuw.'); throw e; } };
   const rows = (s) => s.docs.map((d) => ({ id: d.id, ...d.data() }));
+  const markMember = (key, pid) => (S.authUid ? setDoc(doc(db, 'companies', key, 'auth', S.authUid), { at: Date.now(), ...(pid ? { pid } : {}) }, { merge: true }) : Promise.resolve());
   return {
     start() {
-      onSnapshot(query(collection(db, 'activities'), orderBy('date', 'desc'), limit(500)), (s) => {
+      // lijst met bedrijven: alleen de namen, voor de voorstellen bij het aanmelden
+      onSnapshot(collection(db, 'companies'), (s) => { S.companies = s.docs.map((d) => ({ key: d.id, name: (d.data().name || d.id).trim() })); refresh(); }, (e) => console.error(e));
+      if (S.ck) this.open(S.ck);
+    },
+    // luisteren naar de gegevens van één bedrijf
+    open(key) {
+      stops.forEach((f) => f()); stops = []; ck = key; t0 = Date.now();
+      S.loadedActs = false; S.acts = []; S.joins = []; S.users = {}; S.views = []; S.events = []; S.cfg = null;
+      clearTimeout(timer); timer = setTimeout(() => { if (!S.loadedActs) { S.offline = true; refresh(); } }, 10000);
+      stops.push(onSnapshot(query(col('activities'), orderBy('date', 'desc'), limit(500)), (s) => {
         S.acts = rows(s);
         if (S.loadedActs) for (const ch of s.docChanges()) {
           if (ch.type !== 'added') continue;
@@ -179,37 +188,45 @@ function sharedStore(F, db) {
           if (a.by !== S.me && (a.createdAt || 0) > t0 - 60000 && !isPast(a)) notify(a);
         }
         S.loadedActs = true; S.offline = false; S.denied = false; clearTimeout(timer); refresh();
-      }, fail);
-      onSnapshot(collection(db, 'joins'), (s) => { S.joins = rows(s); refresh(); }, fail);
-      onSnapshot(collection(db, 'users'), (s) => { const u = {}; s.docs.forEach((d) => { u[d.id] = d.data(); }); S.users = u; S.loadedUsers = true; refresh(); }, fail);
-      onSnapshot(collection(db, 'views'), (s) => { S.views = rows(s); for (const v of S.views) if (v.uid === S.me) S.seen.add(v.act); refresh(); }, () => {});
-      onSnapshot(query(collection(db, 'events'), orderBy('at', 'desc'), limit(5000)), (s) => { S.events = rows(s); if (S.tab === 'dash') refresh(); }, () => {});
-      onSnapshot(doc(db, 'config', 'main'), (d) => { S.cfg = d.exists() ? d.data() : null; refresh(); }, () => {});
+      }, fail));
+      stops.push(onSnapshot(col('joins'), (s) => { S.joins = rows(s); refresh(); }, fail));
+      stops.push(onSnapshot(col('users'), (s) => { const u = {}; s.docs.forEach((d) => { u[d.id] = d.data(); }); S.users = u; refresh(); }, fail));
+      stops.push(onSnapshot(col('views'), (s) => { S.views = rows(s); for (const v of S.views) if (v.uid === S.me) S.seen.add(v.act); refresh(); }, () => {}));
+      stops.push(onSnapshot(query(col('events'), orderBy('at', 'desc'), limit(5000)), (s) => { S.events = rows(s); if (S.tab === 'dash') refresh(); }, () => {}));
+      stops.push(onSnapshot(dref('config', 'main'), (d) => { S.cfg = d.exists() ? d.data() : null; refresh(); }, () => {}));
     },
-    async profile(p) { await wrap(setDoc(doc(db, 'users', S.me), p, { merge: true })); },
+    // wie er al bestaat bij een bedrijf (voor "Ben jij dit?")
+    async members(key) {
+      await wrap(markMember(key));
+      const s = await wrap(getDocs(collection(db, 'companies', key, 'users')));
+      const u = {}; s.docs.forEach((d) => { u[d.id] = d.data(); }); return u;
+    },
     // nieuw profiel maken, of een bestaand profiel overnemen op dit toestel
-    async signup(p, pid, id) {
-      if (pid) return wrap(setDoc(doc(db, 'users', pid), { ...p, lastSeen: Date.now(), ...authExtra() }, { merge: true }));
-      return wrap(setDoc(doc(db, 'users', id), { ...p, joinedAt: Date.now(), lastSeen: Date.now(), ...authExtra() }));
+    async signup(p, pid, id, key, isNewCompany) {
+      if (isNewCompany) { try { await setDoc(doc(db, 'companies', key), { name: p.company, createdAt: Date.now() }); } catch (e) { console.warn('bedrijf bestond al', e && e.code); } }
+      const ref = doc(db, 'companies', key, 'users', id);
+      await wrap(pid ? setDoc(ref, { ...p, lastSeen: Date.now(), ...authExtra() }, { merge: true }) : setDoc(ref, { ...p, joinedAt: Date.now(), lastSeen: Date.now(), ...authExtra() }));
+      await wrap(markMember(key, id));
     },
-    async touch() { try { await setDoc(doc(db, 'users', S.me), { lastSeen: Date.now(), ...authExtra() }, { merge: true }); } catch (e) {} },
+    async touch() { if (!ck) return; try { await markMember(ck, S.me); await setDoc(dref('users', S.me), { lastSeen: Date.now(), ...authExtra() }, { merge: true }); } catch (e) {} },
+    async profile(p) { await wrap(setDoc(dref('users', S.me), p, { merge: true })); },
     async create(a) {
-      const ref = doc(collection(db, 'activities')); const data = { ...a, by: S.me, createdAt: Date.now() };
+      const ref = doc(col('activities')); const data = { ...a, by: S.me, createdAt: Date.now() };
       await wrap(setDoc(ref, data));
       if (!S.acts.some((x) => x.id === ref.id)) S.acts = [...S.acts, { id: ref.id, ...data }];
       const jid = `${ref.id}__${S.me}`;
-      try { await wrap(setDoc(doc(db, 'joins', jid), { act: ref.id, uid: S.me, steps: null, at: Date.now() })); if (!S.joins.some((x) => x.id === jid)) S.joins = [...S.joins, { id: jid, act: ref.id, uid: S.me, steps: null }]; } catch (e) {}
+      try { await wrap(setDoc(dref('joins', jid), { act: ref.id, uid: S.me, steps: null, at: Date.now() })); if (!S.joins.some((x) => x.id === jid)) S.joins = [...S.joins, { id: jid, act: ref.id, uid: S.me, steps: null }]; } catch (e) {}
       return ref.id;
     },
-    async join(act) { await wrap(setDoc(doc(db, 'joins', `${act}__${S.me}`), { act, uid: S.me, steps: null, at: Date.now() })); },
-    async leave(act) { await wrap(deleteDoc(doc(db, 'joins', `${act}__${S.me}`))); },
+    async join(act) { await wrap(setDoc(dref('joins', `${act}__${S.me}`), { act, uid: S.me, steps: null, at: Date.now() })); },
+    async leave(act) { await wrap(deleteDoc(dref('joins', `${act}__${S.me}`))); },
     async remove(act) {
-      await wrap(deleteDoc(doc(db, 'activities', act)));
-      for (const j of S.joins.filter((x) => x.act === act)) { try { await deleteDoc(doc(db, 'joins', j.id)); } catch (e) {} }
+      await wrap(deleteDoc(dref('activities', act)));
+      for (const j of S.joins.filter((x) => x.act === act)) { try { await deleteDoc(dref('joins', j.id)); } catch (e) {} }
     },
-    async config(c) { await wrap(setDoc(doc(db, 'config', 'main'), c, { merge: true })); },
-    async view(act) { try { await setDoc(doc(db, 'views', `${act}__${S.me}`), { act, uid: S.me, at: Date.now() }); } catch (e) {} },
-    async track(kind, extra = {}) { try { await addDoc(collection(db, 'events'), { kind, uid: S.me, at: Date.now(), ...extra }); } catch (e) {} },
+    async config(c) { await wrap(setDoc(dref('config', 'main'), c, { merge: true })); },
+    async view(act) { if (!ck) return; try { await setDoc(dref('views', `${act}__${S.me}`), { act, uid: S.me, at: Date.now() }); } catch (e) {} },
+    async track(kind, extra = {}) { if (!ck) return; try { await addDoc(col('events'), { kind, uid: S.me, at: Date.now(), ...extra }); } catch (e) {} },
   };
 }
 
@@ -301,7 +318,7 @@ function card(a) {
     <div>${btn}</div></div>`;
 }
 function banner() {
-  if (S.denied) return `<div class="banner"><b>Database geeft geen toegang</b>Firebase is gekoppeld, maar de regels laten lezen of schrijven niet toe. Plak de regels uit stap 4 van de uitleg in Firebase.</div>`;
+  if (S.denied) return `<div class="banner"><b>Database geeft geen toegang</b>Vernieuw de pagina. Lukt het dan nog niet, laat het weten aan het Wandelbuddy-team.</div>`;
   if (S.offline) return `<div class="banner"><b>Geen verbinding</b>De activiteiten zijn nog niet geladen. Wat je ziet, is misschien niet actueel.</div>`;
   return '';
 }
@@ -315,10 +332,9 @@ function suggHtml() {
 }
 function vWelcome() {
   if (S.claim) {
-    const pid = S.claim.pid; const u = S.users[pid] || {};
-    const n = S.joins.filter((j) => j.uid === pid && actById(j.act)).length;
-    const since = u.joinedAt ? 'sinds ' + new Date(u.joinedAt).toLocaleDateString('nl-BE', { day: 'numeric', month: 'long' }) : '';
-    const info = [esc(u.company || ''), n ? `${n} keer meegedaan` : '', since].filter(Boolean).join(' · ');
+    const pid = S.claim.pid; const u = (S.pendingMembers || {})[pid] || {};
+    const since = u.joinedAt ? 'aangemeld sinds ' + new Date(u.joinedAt).toLocaleDateString('nl-BE', { day: 'numeric', month: 'long' }) : '';
+    const info = [esc(u.company || ''), since].filter(Boolean).join(' · ');
     return `<div class="welcome">
       <div class="logo">${ICON.wandelen}</div>
       <div><h1>Ben jij dit?</h1><p class="muted" style="margin-top:6px">Er bestaat al een profiel met deze naam bij dit bedrijf.</p></div>
@@ -350,29 +366,31 @@ async function submitSignup() {
   if (!first) { toast('Vul je voornaam in.'); $('#wfirst')?.focus(); return; }
   if (!last) { toast('Vul je achternaam in.'); $('#wlast')?.focus(); return; }
   if (!norm(compIn)) { toast('Vul je bedrijf in.'); $('#wcomp')?.focus(); return; }
-  if (!S.loadedUsers) { toast('Even geduld, de app laadt nog. Probeer zo opnieuw.'); return; }
   const companyKey = norm(compIn); const known = companies().find((c) => c.key === companyKey);
   const nameKey = norm(first + last);
+  let members; try { members = await store.members(companyKey); } catch (e) { return; }
+  S.pendingMembers = members; S.pendingNewCompany = !known;
   S.pendingProfile = { name: `${first} ${last}`, first, last, company: known ? known.name : compIn, nameKey, companyKey };
-  const match = Object.entries(S.users).filter(([, u]) => userNameKey(u) === nameKey && userCompKey(u) === companyKey)
+  const match = Object.entries(members).filter(([, u]) => userNameKey(u) === nameKey)
     .sort((a, b) => (b[1].lastSeen || 0) - (a[1].lastSeen || 0))[0];
   if (match) { S.claim = { pid: match[0] }; render(); window.scrollTo(0, 0); return; }
   await finishSignup(null);
 }
 async function finishSignup(pid) {
   const p = S.pendingProfile; if (!p) return;
-  const old = pid ? S.users[pid] || {} : null;
+  const old = pid ? (S.pendingMembers || {})[pid] || {} : null;
   // bij een bestaand profiel blijft de oorspronkelijke schrijfwijze van naam en bedrijf bewaard
   const data = pid ? { nameKey: p.nameKey, companyKey: p.companyKey, ...(old.first ? {} : { first: p.first, last: p.last }), ...(old.company ? {} : { company: p.company }), ...(old.name ? {} : { name: p.name }) } : p;
   // meteen binnenlaten; het bewaren gebeurt op de achtergrond
-  const id = pid || 'u_' + rid();
-  const saving = store.signup(data, pid, id);
-  ls.set('wb-pid', id); S.me = id; S.users[id] = { ...(old || {}), ...data, ...(pid ? {} : { joinedAt: Date.now() }) };
-  S.claim = null; S.signup = null; S.pendingProfile = null;
+  const id = pid || 'u_' + rid(); const key = p.companyKey;
+  const saving = store.signup(data, pid, id, key, S.pendingNewCompany);
+  ls.set('wb-pid', id); ls.set('wb-ck', key); S.me = id; S.ck = key;
+  store.open(key); S.users[id] = { ...(old || {}), ...data, ...(pid ? {} : { joinedAt: Date.now() }) };
+  S.claim = null; S.signup = null; S.pendingProfile = null; S.pendingMembers = null;
   render(); window.scrollTo(0, 0);
   toast(pid ? `Welkom terug, ${p.first}!` : `Welkom, ${p.first}!`);
   try { await saving; trackOpen(); }
-  catch (e) { try { localStorage.removeItem('wb-pid'); } catch (x) {} S.me = null; S.signup = { first: p.first, last: p.last, company: p.company }; render(); }
+  catch (e) { try { localStorage.removeItem('wb-pid'); localStorage.removeItem('wb-ck'); } catch (x) {} S.me = null; S.ck = null; S.signup = { first: p.first, last: p.last, company: p.company }; render(); }
 }
 function vAgenda() {
   const t = todayStr();
@@ -675,7 +693,7 @@ async function handle(el) {
   const act = el.dataset.act;
   if (act === 'home') { S.detail = null; S.draft = null; render(); return; }
   if (act === 'new') { const ns = nextSlot(); S.draft = { type: 'wandelen', date: ns.date, time: ns.time, dur: 20, place: 'Inkom', note: '' }; S.detail = null; render(); window.scrollTo(0, 0); return; }
-  if (act === 'welcome') { el.disabled = true; try { await submitSignup(); } finally { el.disabled = false; } return; }
+  if (act === 'welcome') { el.disabled = true; el.textContent = 'Even geduld…'; try { await submitSignup(); } finally { el.disabled = false; el.textContent = 'Start'; } return; }
   if (act === 'claim-yes') { el.disabled = true; await finishSignup(S.claim && S.claim.pid); return; }
   if (act === 'claim-no') { el.disabled = true; await finishSignup(null); return; }
   if (act === 'claim-back') { S.claim = null; render(); return; }
@@ -769,7 +787,8 @@ async function boot() {
     try {
       const { F, db, Au, auth } = await loadFirebase(cfg);
       S.authUid = await signInAnon(Au, auth);
-      S.mode = 'shared'; S.me = ls.get('wb-pid') || null; store = sharedStore(F, db); store.start(); render();
+      S.ck = ls.get('wb-ck') || null; S.me = (S.ck && ls.get('wb-pid')) || null;
+      S.mode = 'shared'; store = sharedStore(F, db); store.start(); render();
       trackOpen();
       return;
     } catch (e) {
