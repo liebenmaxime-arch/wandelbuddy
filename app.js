@@ -2,6 +2,7 @@
 // De koppeling met Firebase staat in firebase-config.js.
 import { firebaseConfig } from './firebase-config.js';
 import { pushConfig } from './push-config.js';
+import { SPORTS, CAT_ICONS, CAT_SPM } from './sports.js';
 const FB_VER = '10.12.2';
 
 // ---------- constants ----------
@@ -17,8 +18,22 @@ const TYPES = {
   lopen: { label: 'Lopen', spm: 160, durs: [20, 30, 45], dur: 30 },
   padel: { label: 'Padel', spm: 80, durs: [45, 60, 90], dur: 60, max: 4 },
   fietsen: { label: 'Fietsen', spm: 0, durs: [20, 30, 45], dur: 30 },
-  stretch: { label: 'Stretchen', spm: 0, durs: [10, 15, 20], dur: 15 },
+  stretch: { label: 'Yoga', spm: 0, durs: [15, 30, 45, 60], dur: 30 }, // interne sleutel blijft "stretch" (oude activiteiten)
 };
+// "Andere sport": eigen kleur per sport (gekozen op basis van de naam)
+const SPORT_COLORS = ['#2E7D5B', '#C2571B', '#2B6CB0', '#7B5BB5', '#B23E73', '#3F7F8C', '#8A6A1F', '#A23B3B', '#4E6E2E', '#2F5D8A', '#9C4F96', '#B5651D'];
+const SPORT_DURS = [30, 45, 60, 90];
+let sportIndex = null; // genormaliseerde naam → { name, cat }
+const findSport = (name) => { if (!sportIndex) sportIndex = new Map(SPORTS.map(([n, c]) => [norm(n), { name: n, cat: c }])); return sportIndex.get(norm(name)) || null; };
+// alles wat het scherm nodig heeft over het soort activiteit: naam, icoon, kleur, stappen, duurknoppen
+function typeInfo(a) {
+  if (a && a.type === 'sport') {
+    const label = String(a.label || 'Sport').trim() || 'Sport'; const s = findSport(label); const cat = s ? s.cat : 'ster';
+    return { key: 'sport:' + norm(label), label: s ? s.name : label, icon: CAT_ICONS[cat] || CAT_ICONS.ster, color: SPORT_COLORS[hashN(norm(label)) % SPORT_COLORS.length], spm: CAT_SPM[cat] || 0, durs: SPORT_DURS, dur: 60 };
+  }
+  const k = a && TYPES[a.type] ? a.type : 'wandelen'; const t = TYPES[k];
+  return { key: k, label: t.label, icon: ICON[k], color: `var(--t-${k})`, spm: t.spm, durs: t.durs, dur: t.dur, max: t.max };
+}
 const TIMES = ['11:45', '12:00', '12:15', '12:30', '12:45', '13:00', '13:45'];
 const PLACES = ['Inkom', 'Parking', 'Refter'];
 const COLORS = ['#2E7D5B', '#2B6CB0', '#B23E73', '#7B5BB5', '#C2571B', '#3F7F8C', '#8A6A1F'];
@@ -34,6 +49,8 @@ const BADGES = [
 
 // ---------- helpers ----------
 const $ = (s) => document.querySelector(s);
+// alleen het middenstuk scrolt (de balk onderaan staat vast), dus "naar boven" = het middenstuk naar boven
+const toTop = () => { const m = document.getElementById('main'); if (m) m.scrollTop = 0; };
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const pad = (n) => String(n).padStart(2, '0');
 const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -53,7 +70,7 @@ const initials = (n) => (n || '?').split(/\s+/).filter(Boolean).map((p) => p[0])
 const fmtN = (n) => Number(n || 0).toLocaleString('nl-BE');
 const pct = (a, b) => (b ? Math.round(a / b * 100) : 0);
 function nextSlot() { const n = new Date(); const now = n.getHours() * 60 + n.getMinutes(); const wd = n.getDay() % 6 !== 0; const t = TIMES.find((x) => toMin(x) > now + 5); if (wd && t) return { date: todayStr(), time: t }; let d = addDays(n, 1); while (d.getDay() % 6 === 0) d = addDays(d, 1); return { date: ymd(d), time: '12:15' }; }
-const estSteps = (a) => Math.round((TYPES[a.type]?.spm || 0) * a.dur / 100) * 100;
+const estSteps = (a) => Math.round((typeInfo(a).spm || 0) * a.dur / 100) * 100;
 // Voorbeeld: stappen komen "automatisch binnen" na afloop. In de echte app komen ze van de gsm zelf.
 const hashN = (s) => { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h; };
 const stepsOf = (j) => stepsOfAct(j, actById(j.act));
@@ -315,7 +332,7 @@ function mine() {
     stepsMonth: done.filter((j) => monthKey(actById(j.act).date) === mk).reduce((s, j) => s + stepsOf(j), 0),
     monthCount: done.filter((j) => monthKey(actById(j.act).date) === mk).length,
     weeks: new Set(done.map((j) => weekKey(actById(j.act).date))).size,
-    types: new Set(done.map((j) => actById(j.act).type)).size,
+    types: new Set(done.map((j) => typeInfo(actById(j.act)).key)).size,
     led: S.acts.filter((a) => a.by === S.me).length,
   };
 }
@@ -332,19 +349,19 @@ function notify(a) {
   try { if (navigator.vibrate) navigator.vibrate([120, 60, 120]); } catch (e) {}
   if (document.hidden) {
     document.title = '🔔 Nieuwe activiteit · ' + BASE_TITLE;
-    try { if ('Notification' in window && Notification.permission === 'granted') new Notification(`${realName(a.by)} gaat ${(TYPES[a.type] || TYPES.wandelen).label.toLowerCase()}`, { body: `${dayLabel(a.date)} om ${hhmm(a.time)} · ${a.place}`, tag: a.id }); } catch (e) {}
+    try { if ('Notification' in window && Notification.permission === 'granted') new Notification(`${realName(a.by)} gaat ${typeInfo(a).label.toLowerCase()}`, { body: `${dayLabel(a.date)} om ${hhmm(a.time)} · ${a.place}`, tag: a.id }); } catch (e) {}
   }
   store.track('notif_shown', { act: a.id });
 }
 function showPop() {
   const w = $('#pop'); const q = S.notifQ[0]; const a = q && actById(q.id);
   if (!a || (q.kind === 'remind' && isPast(a))) { if (q) { S.notifQ.shift(); return showPop(); } w.hidden = true; w.innerHTML = ''; return; }
-  const t = TYPES[a.type] || TYPES.wandelen; const g = goingOf(a.id); const more = S.notifQ.length - 1;
+  const t = typeInfo(a); const g = goingOf(a.id); const more = S.notifQ.length - 1;
   if (q.kind === 'remind') {
     const mins = Math.max(1, Math.ceil(toMin(a.time) - (new Date().getHours() * 60 + new Date().getMinutes())));
     w.innerHTML = `<div class="pop" role="alertdialog" aria-labelledby="poptitle">
       <div class="bell">⏰ Herinnering${more > 0 ? ` · nog ${more}` : ''}</div>
-      <div class="ptop"><div class="ticon" style="background:var(--t-${a.type})">${ICON[a.type] || ICON.wandelen}</div>
+      <div class="ptop"><div class="ticon" style="background:${t.color}">${t.icon}</div>
         <div><b id="poptitle" style="font-size:17px">Over ${mins} ${mins === 1 ? 'minuut' : 'minuten'}: ${esc(t.label.toLowerCase())}</b>
         <div class="muted small">Om ${hhmm(a.time)} · vertrek aan ${esc(a.place)} · terug om ${fromMin(toMin(a.time) + a.dur)}</div></div></div>
       <div class="cgoing">${avatars(g.map((j) => j.uid))}${g.length === 1 ? 'Jij gaat' : g.length + ' mensen gaan mee'}</div>
@@ -353,7 +370,7 @@ function showPop() {
   }
   w.innerHTML = `<div class="pop" role="alertdialog" aria-labelledby="poptitle">
     <div class="bell">🔔 Nieuwe activiteit${more > 0 ? ` · nog ${more}` : ''}</div>
-    <div class="ptop"><div class="ticon" style="background:var(--t-${a.type})">${ICON[a.type] || ICON.wandelen}</div>
+    <div class="ptop"><div class="ticon" style="background:${t.color}">${t.icon}</div>
       <div><b id="poptitle" style="font-size:17px">${esc(realName(a.by))} gaat ${esc(t.label.toLowerCase())}</b>
       <div class="muted small">${esc(dayLabel(a.date))} om ${hhmm(a.time)} · ${a.dur} min · vertrek: ${esc(a.place)}</div></div></div>
     ${a.note ? `<p class="small">${esc(a.note)}</p>` : ''}
@@ -449,13 +466,13 @@ function avatars(uids) {
   return `<span class="avs">${uids.slice(0, 4).map((u) => `<span style="background:${colorFor(u)}">${face(u, nameOf(u))}</span>`).join('')}</span>`;
 }
 function card(a) {
-  const g = goingOf(a.id); const t = TYPES[a.type] || TYPES.wandelen; const joined = iJoined(a.id); const past = isPast(a);
+  const g = goingOf(a.id); const t = typeInfo(a); const joined = iJoined(a.id); const past = isPast(a);
   const max = a.max || t.max; const full = max && g.length >= max && !joined;
   const count = max ? `${g.length}/${max} spelers` : g.length === 1 ? '1 doet mee' : `${g.length} doen mee`;
   let btn = '';
   if (!past) btn = joined ? '<span class="pill in">Je doet mee</span>' : full ? '<span class="pill full">Volzet</span>' : `<button class="pill join" type="button" data-join="${a.id}">Doe mee</button>`;
   return `<div class="card ${past ? 'past' : ''} ${a.by === S.me ? 'mine' : ''} ${a.id === S.justAdded ? 'new' : ''}" role="button" tabindex="0" data-open="${a.id}">
-    <div class="ticon" style="background:var(--t-${a.type})">${ICON[a.type] || ICON.wandelen}</div>
+    <div class="ticon" style="background:${t.color}">${t.icon}</div>
     <div class="cmeta"><span class="ctitle">${hhmm(a.time)} · ${t.label} · ${a.dur} min</span>
       <span class="csub">${esc(a.place)} · door ${esc(nameOf(a.by))}</span>
       <span class="cgoing">${avatars(g.map((j) => j.uid))}${count}</span></div>
@@ -517,7 +534,7 @@ async function submitSignup() {
   S.pendingProfile = { name: `${first} ${last}`, first, last, company: known ? known.name : compIn, nameKey, companyKey };
   const match = Object.entries(members).filter(([, u]) => userNameKey(u) === nameKey)
     .sort((a, b) => (b[1].lastSeen || 0) - (a[1].lastSeen || 0))[0];
-  if (match) { S.claim = { pid: match[0] }; render(); window.scrollTo(0, 0); return; }
+  if (match) { S.claim = { pid: match[0] }; render(); toTop(); return; }
   await finishSignup(null);
 }
 async function finishSignup(pid) {
@@ -531,7 +548,7 @@ async function finishSignup(pid) {
   ls.set('wb-pid', id); ls.set('wb-ck', key); S.me = id; S.ck = key;
   store.open(key); S.users[id] = { ...(old || {}), ...data, ...(pid ? {} : { joinedAt: Date.now() }) };
   S.claim = null; S.signup = null; S.pendingProfile = null; S.pendingMembers = null;
-  render(); window.scrollTo(0, 0);
+  render(); toTop();
   toast(pid ? `Welkom terug, ${p.first}!` : `Welkom, ${p.first}!`);
   try { await saving; trackOpen(); }
   catch (e) { try { localStorage.removeItem('wb-pid'); localStorage.removeItem('wb-ck'); } catch (x) {} S.me = null; S.ck = null; S.signup = { first: p.first, last: p.last, company: p.company }; render(); }
@@ -561,7 +578,7 @@ function vAgenda() {
 function vDetail() {
   const a = actById(S.detail);
   if (!a) { if (S.mode === 'shared' && !S.loadedActs) return '<p class="loading">Activiteit laden…</p>'; S.detail = null; return vAgenda(); }
-  const t = TYPES[a.type] || TYPES.wandelen; const g = goingOf(a.id); const joined = iJoined(a.id); const past = isPast(a); const isMine = a.by === S.me;
+  const t = typeInfo(a); const g = goingOf(a.id); const joined = iJoined(a.id); const past = isPast(a); const isMine = a.by === S.me;
   const max = a.max || t.max; const full = max && g.length >= max && !joined;
   const ppl = g.map((j) => `<div class="person"><div class="av" style="background:${colorFor(j.uid)}">${face(j.uid, nameOf(j.uid))}</div><div><b>${esc(nameOf(j.uid))}</b><small>${j.uid === a.by ? 'organiseert' : 'doet mee'}${past && stepsOf(j) ? ' · ' + fmtN(stepsOf(j)) + ' stappen' : ''}</small></div></div>`).join('');
   let actions = '';
@@ -579,7 +596,7 @@ function vDetail() {
   }
   const del = isMine ? `<button class="danger" type="button" data-act="del">${S.confirmDel ? 'Tik nog eens om te verwijderen' : 'Activiteit verwijderen'}</button>` : '';
   return `<button class="back" type="button" data-act="home">‹ Terug</button>
-    <div class="hero"><div class="ticon" style="background:var(--t-${a.type})">${ICON[a.type] || ICON.wandelen}</div>
+    <div class="hero"><div class="ticon" style="background:${t.color}">${t.icon}</div>
       <div><div class="eyebrow">${esc(dayLabel(a.date))} · ${t.label}</div><div class="bigtime">${hhmm(a.time)}</div></div></div>
     ${a.note ? `<p>${esc(a.note)}</p>` : ''}
     <div class="facts">
@@ -593,23 +610,54 @@ function vDetail() {
     ${actions}${del}`;
 }
 function draftDays() { const out = []; for (let n = 0; out.length < 5 && n < 14; n++) { const x = addDays(new Date(), n); const w = x.getDay(); if (w !== 0 && w !== 6) out.push(ymd(x)); } return out; }
+// ---------- een activiteit plannen ----------
+const svgI = (inner) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
+const PLUS_I = svgI('<path d="M12 5v14M5 12h14"/>');
+const CAL_I = svgI('<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/>');
+// "1340", "13:40", "13u40", "13.40", "13,40", "13u", "13" → "13:40"; onmogelijk → null
+function parseTime(s) {
+  const t = String(s || '').trim().toLowerCase().replace(/\s+/g, '');
+  if (!t) return null;
+  let m = /^(\d{1,2})[:.,uh](\d{2})$/.exec(t) || /^(\d{1,2})(\d{2})$/.exec(t); let h; let mi;
+  if (m) { h = Number(m[1]); mi = Number(m[2]); } else if ((m = /^(\d{1,2})(u|h|uur)?$/.exec(t))) { h = Number(m[1]); mi = 0; } else return null;
+  return h > 23 || mi > 59 ? null : `${pad(h)}:${pad(mi)}`;
+}
+// "45", "45 min", "90min" → 45 / 90; buiten 5–240 → null
+function parseDur(s) { const m = /^(\d{1,3})(m|min|minuten)?$/.exec(String(s || '').trim().toLowerCase().replace(/\s+/g, '')); const n = m ? Number(m[1]) : NaN; return n >= 5 && n <= 240 ? n : null; }
+const draftType = (d) => typeInfo(d.type === 'sport' ? { type: 'sport', label: d.label } : d);
+const longDay = (s) => parseDate(s).toLocaleDateString('nl-BE', { weekday: 'short', day: 'numeric', month: 'short', ...(parseDate(s).getFullYear() !== new Date().getFullYear() ? { year: 'numeric' } : {}) });
+function newDraft() {
+  const ns = nextSlot();
+  // vertrekpunt start leeg: er wordt NOOIT automatisch iets ingevuld
+  return { type: 'wandelen', label: null, date: ns.date, time: ns.time, timeFixed: ns.time, timeText: '', timeBad: false, dur: 20, durFixed: 20, durText: '', durBad: false, place: '', placeFixed: '', placeText: '', note: '' };
+}
+function draftSummary() {
+  const d = S.draft;
+  if (d.timeBad) return 'Dat uur klopt niet. Typ bv. 13:40 of 1340.';
+  if (d.durBad) return 'Typ een duur tussen 5 en 240 minuten.';
+  return `Terug om ${fromMin(toMin(d.time) + d.dur)}. Je collega's krijgen meteen een melding.`;
+}
 function vCreate() {
-  const d = S.draft; const t = TYPES[d.type];
-  const days = draftDays();
-  if (!days.includes(d.date)) d.date = days[0];
-  const chip = (key, val, label, extra = '') => `<button type="button" class="chip" data-set="${key}" data-val="${esc(val)}" aria-pressed="${String(d[key]) === String(val)}">${extra}${label}</button>`;
+  const d = S.draft; const t = draftType(d);
+  const days = draftDays(); const otherDate = !days.includes(d.date);
+  const chip = (key, val, label, on, extra = '') => `<button type="button" class="chip" data-set="${key}" data-val="${esc(val)}" aria-pressed="${on}">${extra}${label}</button>`;
+  const other = (id, label, text, bad, ph, mode, max, suffix = '') => `<label class="chip othertime${text && !bad ? ' on' : ''}${bad ? ' bad' : ''}" for="${id}">${label}
+      <input id="${id}" type="text" inputmode="${mode}" maxlength="${max}" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${ph}" value="${esc(text)}" aria-label="${label}">${suffix}</label>`;
   return `<button class="back" type="button" data-act="home">‹ Annuleren</button>
     <div><h1>Nieuwe activiteit</h1><p class="muted">Kies iets kleins. Een kwartier wandelen is al genoeg.</p></div>
-    <div class="field"><span>Wat</span><div class="chips">${Object.entries(TYPES).map(([k, v]) => chip('type', k, v.label, ICON[k])).join('')}</div></div>
-    <div class="field"><span>Wanneer</span><div class="chips">${days.map((s) => chip('date', s, esc(shortDay(s)))).join('')}</div></div>
-    <div class="field"><span>Hoe laat</span><div class="chips">${TIMES.map((x) => chip('time', x, hhmm(x))).join('')}
-      <label class="chip othertime${TIMES.includes(d.time) ? '' : ' on'}">Ander uur <input type="time" id="ctime" value="${TIMES.includes(d.time) ? '' : d.time}" min="06:00" max="22:00" aria-label="Ander uur"></label></div></div>
-    <div class="field"><span>Hoe lang</span><div class="chips">${t.durs.map((x) => chip('dur', x, x + ' min')).join('')}</div></div>
-    <div class="field"><span>Vertrekpunt</span><div class="chips">${PLACES.map((x) => chip('place', x, x)).join('')}</div>
-      <input class="text" id="cplace" type="text" maxlength="60" placeholder="Of typ een andere plek" value="${PLACES.includes(d.place) ? '' : esc(d.place)}" autocomplete="off"></div>
+    <div class="field"><span>Wat</span><div class="chips">${Object.entries(TYPES).map(([k, v]) => chip('type', k, v.label, d.type === k, ICON[k])).join('')}
+      <button type="button" class="chip" data-act="sport-open" aria-pressed="${d.type === 'sport'}">${d.type === 'sport' ? t.icon + esc(t.label) : PLUS_I + 'Andere sport'}</button></div></div>
+    <div class="field"><span>Wanneer</span><div class="chips">${days.map((s) => chip('date', s, esc(shortDay(s)), d.date === s)).join('')}
+      <button type="button" class="chip" data-act="date-open" aria-pressed="${otherDate}">${CAL_I}${otherDate ? esc(longDay(d.date)) : 'Andere datum'}</button></div></div>
+    <div class="field"><span>Hoe laat</span><div class="chips">${TIMES.map((x) => chip('time', x, hhmm(x), !d.timeText && d.time === x)).join('')}
+      ${other('ctime', 'Ander uur', d.timeText, d.timeBad, 'bv. 13:40', 'text', 6)}</div></div>
+    <div class="field"><span>Hoe lang</span><div class="chips">${t.durs.map((x) => chip('dur', x, x + ' min', !d.durText && d.dur === x)).join('')}
+      ${other('cdur', 'Andere duur', d.durText, d.durBad, '5–240', 'numeric', 3, '<span class="unit">min</span>')}</div></div>
+    <div class="field"><span>Vertrekpunt</span><div class="chips">${PLACES.map((x) => chip('place', x, x, !d.placeText && d.place === x)).join('')}</div>
+      <input class="text" id="cplace" type="text" maxlength="60" placeholder="Andere locatie" value="${esc(d.placeText)}" autocomplete="off" aria-label="Andere locatie"></div>
     <div class="field"><span>Extra info (optioneel)</span><input class="text" id="cnote" type="text" maxlength="100" placeholder="${d.type === 'padel' ? 'bv. terrein 2, ik breng ballen mee' : 'bv. rustig tempo, iedereen welkom'}" value="${esc(d.note)}" autocomplete="off"></div>
-    ${t.max ? `<p class="muted small">${t.label}: maximaal ${t.max} spelers, jij inbegrepen.</p>` : ''}
-    <p class="muted small">Terug om ${fromMin(toMin(d.time) + d.dur)}. Iedereen die de app open heeft, krijgt meteen een melding.</p>
+    ${t.max ? `<p class="muted small">${esc(t.label)}: maximaal ${t.max} spelers, jij inbegrepen.</p>` : ''}
+    <p class="muted small" id="csum">${esc(draftSummary())}</p>
     <button class="primary" type="button" data-act="post">Plaatsen</button>`;
 }
 function lungsSvg(p) {
@@ -705,7 +753,7 @@ function dashData() {
   const saw = new Set(views.map((v) => v.uid)); const tapped = new Set(extraJoins.map((j) => j.uid)); const planners = new Set(acts.map((a) => a.by));
   const groupSizes = pastActs.map((a) => joins.filter((j) => j.act === a.id).length).filter((n) => n > 0);
   const count = (arr, key) => { const m = {}; arr.forEach((x) => { const k = key(x); m[k] = (m[k] || 0) + 1; }); return Object.entries(m).sort((a, b) => b[1] - a[1])[0]; };
-  const topTime = count(acts, (a) => a.time); const topType = count(joins, (j) => actById(j.act).type);
+  const topTime = count(acts, (a) => a.time); const topType = count(joins, (j) => typeInfo(actById(j.act)).label);
   const perAct = acts.slice().sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time)).map((a) => {
     const v = views.filter((x) => x.act === a.id).length; const jn = extraJoins.filter((x) => x.act === a.id).length;
     return { a, seen: v, joined: jn, total: joins.filter((x) => x.act === a.id).length, conv: pct(jn, v) };
@@ -766,11 +814,11 @@ function vDash() {
     <div class="kpis">
       <div class="kpi"><b>${conv}%</b><small>van de keren dat iemand een activiteit zag, deed die mee</small><span class="sub">${D.extraJoins.length} van ${D.views.length}</span></div>
       <div class="kpi"><b>${D.notifShown}</b><small>meldingen getoond</small><span class="sub">${D.notifJoin} keer meteen "Ik ga mee"</span></div>
-      <div class="kpi"><b>${D.topTime ? hhmm(D.topTime[0]) : '–'}</b><small>populairste uur</small><span class="sub">${D.topType ? esc(TYPES[D.topType[0]]?.label || '') + ' is favoriet' : ''}</span></div>
+      <div class="kpi"><b>${D.topTime ? hhmm(D.topTime[0]) : '–'}</b><small>populairste uur</small><span class="sub">${D.topType ? esc(D.topType[0]) + ' is favoriet' : ''}</span></div>
     </div>
     <h2>Per activiteit</h2>
     <div class="tablewrap"><table class="t"><thead><tr><th>Wanneer</th><th>Wat</th><th>Door</th><th class="n">Gezien</th><th class="n">Doe mee</th><th class="n">%</th></tr></thead><tbody>
-      ${D.perAct.map((r) => `<tr><td>${esc(shortDay(r.a.date))} ${hhmm(r.a.time)}</td><td>${esc(TYPES[r.a.type]?.label || r.a.type)}</td><td>${esc(realName(r.a.by))}</td><td class="n">${r.seen}</td><td class="n">${r.joined}</td><td class="n">${r.seen ? r.conv + '%' : '–'}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">Nog geen activiteiten in deze periode.</td></tr>'}
+      ${D.perAct.map((r) => `<tr><td>${esc(shortDay(r.a.date))} ${hhmm(r.a.time)}</td><td>${esc(typeInfo(r.a).label)}</td><td>${esc(realName(r.a.by))}</td><td class="n">${r.seen}</td><td class="n">${r.joined}</td><td class="n">${r.seen ? r.conv + '%' : '–'}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">Nog geen activiteiten in deze periode.</td></tr>'}
     </tbody></table></div>
     <h2>Per tester</h2>
     <p class="note">Alleen voor jullie test. In het echte product zou een werkgever enkel totalen zien, niet wat elke medewerker apart doet (privacy).</p>
@@ -843,7 +891,7 @@ async function handle(el) {
     if (k === 'ok' && id) store.track('reminder_ok', { act: id });
     if (k === 'cancel' && id) { try { await store.leave(id); store.track('leave', { act: id, from: 'reminder' }); toast('Je bent afgemeld. De anderen zien het meteen.'); } catch (e) {} }
     if (k === 'join' && id) { try { await store.join(id); store.track('notif_join', { act: id }); toast('Je doet mee. Tot straks!'); } catch (e) {} }
-    if (k === 'open' && id) { store.track('notif_open', { act: id }); S.detail = id; S.draft = null; S.tab = 'agenda'; render(); window.scrollTo(0, 0); }
+    if (k === 'open' && id) { store.track('notif_open', { act: id }); S.detail = id; S.draft = null; S.tab = 'agenda'; render(); toTop(); }
     if (!S.notifQ.length) document.title = BASE_TITLE;
     showPop(); return;
   }
@@ -854,30 +902,45 @@ async function handle(el) {
   if (el.dataset.admco) { S.admKey = el.dataset.admco; admStore.open(S.admKey); render(); return; }
   if (el.dataset.filter) { S.filter = el.dataset.filter; render(); return; }
   if (el.dataset.period) { S.period = el.dataset.period; render(); return; }
-  if (el.dataset.tab) { S.tab = el.dataset.tab; S.detail = null; S.draft = null; history.replaceState(null, '', S.tab === 'dash' ? '#dashboard' : location.pathname + location.search); render(); window.scrollTo(0, 0); return; }
+  if (el.dataset.tab) { S.tab = el.dataset.tab; S.detail = null; S.draft = null; history.replaceState(null, '', S.tab === 'dash' ? '#dashboard' : location.pathname + location.search); render(); toTop(); return; }
   if (el.dataset.join) { try { await store.join(el.dataset.join); toast('Je doet mee. Tot straks!'); } catch (e) {} return; }
-  if (el.dataset.open) { S.detail = el.dataset.open; S.confirmDel = false; render(); window.scrollTo(0, 0); return; }
-  if (el.dataset.set) {
-    const k = el.dataset.set; let v = el.dataset.val;
-    if (k === 'dur') v = Number(v);
-    if (k === 'type') { S.draft.dur = TYPES[v].dur; if (v === 'padel' && PLACES.includes(S.draft.place)) S.draft.place = 'Padelclub'; if (v !== 'padel' && S.draft.place === 'Padelclub') S.draft.place = 'Inkom'; }
-    if (k === 'place') { const ip = $('#cplace'); if (ip) ip.value = ''; }
-    if (k === 'time') { const ct = $('#ctime'); if (ct) ct.value = ''; }
-    readDraftInputs(); S.draft[k] = v; render(); return;
+  if (el.dataset.open) { S.detail = el.dataset.open; S.confirmDel = false; render(); toTop(); return; }
+  if (el.dataset.set && S.draft) {
+    const d = S.draft; const k = el.dataset.set; const v = el.dataset.val;
+    // het vertrekpunt wordt hier nooit aangepast, ook niet bij het wisselen van activiteit
+    if (k === 'type') { d.type = v; d.label = null; if (!d.durText) { d.dur = TYPES[v].dur; d.durFixed = d.dur; } }
+    if (k === 'date') d.date = v;
+    if (k === 'time') { d.time = v; d.timeFixed = v; d.timeText = ''; d.timeBad = false; } // vast uur → vakje "Ander uur" leeg
+    if (k === 'dur') { d.dur = Number(v); d.durFixed = d.dur; d.durText = ''; d.durBad = false; }
+    if (k === 'place') { d.place = v; d.placeFixed = v; d.placeText = ''; }
+    render(); return;
   }
+  if (el.dataset.sport && S.draft) { // gekozen in de lijst "Andere sport"
+    const d = S.draft; d.type = 'sport'; d.label = el.dataset.sport.trim().slice(0, 40);
+    if (!d.durText) { d.dur = 60; d.durFixed = 60; }
+    closeSheet(); render(); return;
+  }
+  if (el.dataset.cal && S.draft) { S.draft.date = el.dataset.cal; closeSheet(); render(); return; }
   const act = el.dataset.act;
   if (act === 'home') { S.detail = null; S.draft = null; render(); return; }
-  if (act === 'new') { const ns = nextSlot(); S.draft = { type: 'wandelen', date: ns.date, time: ns.time, dur: 20, place: 'Inkom', note: '' }; S.detail = null; render(); window.scrollTo(0, 0); return; }
+  if (act === 'new') { S.draft = newDraft(); S.detail = null; render(); toTop(); return; }
+  if (act === 'sport-open') { openSheet('sport'); return; }
+  if (act === 'date-open') { openSheet('date'); return; }
+  if (act === 'sheet-close') { closeSheet(); return; }
+  if (act === 'cal-prev' || act === 'cal-next') { if (S.sheet) { S.sheet.m = Math.max(0, Math.min(12, S.sheet.m + (act === 'cal-next' ? 1 : -1))); renderSheet(); } return; }
   if (act === 'welcome') { el.disabled = true; el.textContent = 'Even geduld…'; try { await submitSignup(); } finally { el.disabled = false; el.textContent = 'Start'; } return; }
   if (act === 'claim-yes') { el.disabled = true; await finishSignup(S.claim && S.claim.pid); return; }
   if (act === 'claim-no') { el.disabled = true; await finishSignup(null); return; }
   if (act === 'claim-back') { S.claim = null; render(); return; }
   if (act === 'post') {
     readDraftInputs(); const d = S.draft;
+    if (d.timeBad) { toast('Dat uur klopt niet. Typ bv. 13:40 of 1340.'); return; }
+    if (d.durBad) { toast('Typ een duur tussen 5 en 240 minuten.'); return; }
     if (!d.place.trim()) { toast('Kies of typ een vertrekpunt.'); return; }
     if (isPast({ date: d.date, time: d.time, dur: 0 })) { toast('Dat uur is al voorbij. Kies een later uur of een andere dag.'); return; }
-    const payload = { type: d.type, date: d.date, time: d.time, dur: d.dur, place: d.place.trim().slice(0, 60), note: d.note.trim().slice(0, 100) };
-    if (TYPES[d.type].max) payload.max = TYPES[d.type].max;
+    const t = draftType(d);
+    const payload = { type: d.type, label: t.label, date: d.date, time: d.time, dur: d.dur, place: d.place.trim().slice(0, 60), note: d.note.trim().slice(0, 100) };
+    if (t.max) payload.max = t.max;
     el.disabled = true;
     try {
       const id = await store.create(payload); store.track('create', { act: id });
@@ -885,7 +948,7 @@ async function handle(el) {
       if (S.mode === 'shared' && pushConfig.workerUrl) fetch(`${pushConfig.workerUrl}/run?c=${encodeURIComponent(S.ck)}`, { mode: 'no-cors' }).catch(() => {});
       S.draft = null; S.detail = null; S.tab = 'agenda'; S.filter = 'all'; S.justAdded = id; render();
       const c = document.querySelector(`[data-open="${id}"]`);
-      if (c) c.scrollIntoView({ block: 'center', behavior: 'smooth' }); else window.scrollTo(0, 0);
+      if (c) c.scrollIntoView({ block: 'center', behavior: 'smooth' }); else toTop();
       toast(`Geplaatst: ${dayLabel(payload.date).toLowerCase()} om ${hhmm(payload.time)}. Iedereen ziet het nu.`);
     } catch (e) { el.disabled = false; }
     return;
@@ -894,7 +957,7 @@ async function handle(el) {
   if (act === 'leave') { try { await store.leave(S.detail); store.track('leave', { act: S.detail }); toast('Je bent afgemeld.'); } catch (e) {} return; }
   if (act === 'del') { if (!S.confirmDel) { S.confirmDel = true; render(); return; } try { await store.remove(S.detail); S.detail = null; S.confirmDel = false; render(); toast('Activiteit verwijderd.'); } catch (e) {} return; }
   if (act === 'share') {
-    const a = actById(S.detail); const t = TYPES[a.type]; const link = /^https?:/.test(location.href) ? ' ' + location.href.split('#')[0] : '';
+    const a = actById(S.detail); const t = typeInfo(a); const link = /^https?:/.test(location.href) ? ' ' + location.href.split('#')[0] : '';
     const txt = `${t.label} ${dayLabel(a.date).toLowerCase()} om ${hhmm(a.time)}, ${a.dur} min, vertrek: ${a.place}.${a.note ? ' ' + a.note + '.' : ''} Wie doet mee? Zet je erbij in Wandelbuddy:${link}`;
     try { await navigator.clipboard.writeText(txt); toast('Uitnodiging gekopieerd.'); } catch (e) { toast(txt); }
     return;
@@ -920,7 +983,7 @@ async function handle(el) {
   }
   if (act === 'admlogout') { await admStore.logout(); S.admin = null; S.tab = 'samen'; history.replaceState(null, '', location.pathname + location.search); render(); toast('Je bent afgemeld als beheerder.'); return; }
   if (act === 'csv-users') { const D = dashData(); csvDownload('wandelbuddy-testers.csv', [['Naam', 'Bedrijf', 'Keer geopend', 'Activiteiten gezien', 'Doe mee getikt', 'Zelf gepland', 'Stappen', 'Beweegminuten'], ...D.perUser.map((r) => [r.name, r.company, r.opens, r.seen, r.joined, r.planned, r.steps, r.minutes])]); return; }
-  if (act === 'csv-acts') { const D = dashData(); csvDownload('wandelbuddy-activiteiten.csv', [['Datum', 'Uur', 'Activiteit', 'Duur (min)', 'Vertrek', 'Georganiseerd door', 'Gezien door', 'Doe mee getikt', 'Totaal deelnemers', 'Conversie %'], ...D.perAct.map((r) => [r.a.date, r.a.time, TYPES[r.a.type]?.label || r.a.type, r.a.dur, r.a.place, D.realName(r.a.by), r.seen, r.joined, r.total, r.seen ? r.conv : ''])]); return; }
+  if (act === 'csv-acts') { const D = dashData(); csvDownload('wandelbuddy-activiteiten.csv', [['Datum', 'Uur', 'Activiteit', 'Duur (min)', 'Vertrek', 'Georganiseerd door', 'Gezien door', 'Doe mee getikt', 'Totaal deelnemers', 'Conversie %'], ...D.perAct.map((r) => [r.a.date, r.a.time, typeInfo(r.a).label, r.a.dur, r.a.place, D.realName(r.a.by), r.seen, r.joined, r.total, r.seen ? r.conv : ''])]); return; }
   if (act === 'pushon') {
     el.disabled = true;
     try { S.pushOn = await pushSubscribe(true); toast(S.pushOn ? 'Meldingen staan aan op dit toestel.' : Notification.permission === 'denied' ? 'Meldingen zijn niet toegestaan. Je kunt ze aanzetten in de instellingen van je toestel.' : 'Meldingen aanzetten lukte niet.'); }
@@ -931,31 +994,96 @@ async function handle(el) {
   if (act === 'simulate') { S.tab = 'agenda'; render(); store.simulate(); return; }
   if (act === 'reset') { await store.reset(); S.detail = null; S.notifQ = []; S.reminded = new Set(); ls.set('wb-reminded', '[]'); showPop(); toast('Demo opnieuw gestart.'); return; }
 }
-function readDraftInputs() {
-  if (!S.draft) return;
-  const p = $('#cplace'); if (p && p.value.trim()) S.draft.place = p.value;
-  const n = $('#cnote'); if (n) S.draft.note = n.value;
-  const t = $('#ctime'); if (t && t.value) S.draft.time = t.value;
+function readDraftInputs() { if (!S.draft) return; const n = $('#cnote'); if (n) S.draft.note = n.value; }
+// tijdens het typen: alleen de knoppen en kleuren bijwerken (niet het hele scherm, zodat het toetsenbord open blijft)
+function syncDraft() {
+  const d = S.draft; if (!d) return;
+  document.querySelectorAll('[data-set="time"]').forEach((b) => b.setAttribute('aria-pressed', String(!d.timeText && d.time === b.dataset.val)));
+  document.querySelectorAll('[data-set="dur"]').forEach((b) => b.setAttribute('aria-pressed', String(!d.durText && String(d.dur) === b.dataset.val)));
+  document.querySelectorAll('[data-set="place"]').forEach((b) => b.setAttribute('aria-pressed', String(!d.placeText && d.place === b.dataset.val)));
+  for (const [id, text, bad] of [['ctime', d.timeText, d.timeBad], ['cdur', d.durText, d.durBad]]) {
+    const l = document.getElementById(id)?.closest('.othertime'); if (l) { l.classList.toggle('on', !!text && !bad); l.classList.toggle('bad', !!bad); }
+  }
+  const s = $('#csum'); if (s) s.textContent = draftSummary();
 }
-document.addEventListener('click', (e) => { const el = e.target.closest('[data-tab],[data-join],[data-open],[data-set],[data-act],[data-pop],[data-period],[data-filter],[data-comp],[data-admco],[data-installos]'); if (el) { e.stopPropagation(); handle(el); } });
+function draftInput(id, value) {
+  const d = S.draft; if (!d) return false;
+  if (id === 'ctime') { d.timeText = value.trim(); const p = parseTime(d.timeText); if (!d.timeText) { d.timeBad = false; d.time = d.timeFixed; } else if (p) { d.time = p; d.timeBad = false; } else d.timeBad = true; }
+  else if (id === 'cdur') { d.durText = value.trim(); const n = parseDur(d.durText); if (!d.durText) { d.durBad = false; d.dur = d.durFixed; } else if (n) { d.dur = n; d.durBad = false; } else d.durBad = true; }
+  else if (id === 'cplace') { d.placeText = value; d.place = value.trim() || d.placeFixed; }
+  else if (id === 'cnote') { d.note = value; return true; }
+  else return false;
+  syncDraft(); return true;
+}
+
+// ---------- uitschuifpaneel: "Andere sport" en "Andere datum" ----------
+function openSheet(kind) { readDraftInputs(); S.sheet = { kind, q: '', m: 0 }; if (kind === 'date' && S.draft) { const a = parseDate(S.draft.date); const n = new Date(); S.sheet.m = Math.max(0, (a.getFullYear() - n.getFullYear()) * 12 + a.getMonth() - n.getMonth()); } renderSheet(); if (kind === 'sport') setTimeout(() => $('#sportq')?.focus(), 50); }
+function closeSheet() { S.sheet = null; renderSheet(); }
+function sportListHtml(q) {
+  const k = norm(q);
+  // alle sporten waarin de letters voorkomen; sporten die ermee beginnen (of een woord dat ermee begint) eerst
+  const starts = (n) => norm(n).startsWith(k) || n.split(/[\s-]+/).some((w) => norm(w).startsWith(k));
+  const hits = SPORTS.filter(([n]) => !k || norm(n).includes(k));
+  const list = k ? [...hits.filter(([n]) => starts(n)), ...hits.filter(([n]) => !starts(n))] : hits;
+  const exact = list.some(([n]) => norm(n) === k);
+  const item = (name, cat) => { const t = typeInfo({ type: 'sport', label: name }); return `<button type="button" class="sport-i" data-sport="${esc(name)}"><span class="ticon" style="background:${t.color}">${cat ? CAT_ICONS[cat] : CAT_ICONS.ster}</span><span>${esc(name)}</span></button>`; };
+  // staat je sport er niet bij? dan kun je je getypte naam toch gebruiken (onderaan, of bovenaan als er niets gevonden is)
+  const own = q.trim() && !exact ? `<button type="button" class="sport-i own" data-sport="${esc(q.trim().slice(0, 40))}"><span class="ticon" style="background:var(--orange)">${CAT_ICONS.ster}</span><span>Gebruik “${esc(q.trim().slice(0, 40))}”</span></button>` : '';
+  if (!list.length) return own + '<p class="muted small" style="padding:8px 4px">Deze sport staat niet in de lijst. Tik hierboven om je eigen naam te gebruiken.</p>';
+  return list.map(([n, c]) => item(n, c)).join('') + own;
+}
+function calHtml(m) {
+  const now = new Date(); const first = new Date(now.getFullYear(), now.getMonth() + m, 1);
+  const title = first.toLocaleDateString('nl-BE', { month: 'long', year: 'numeric' });
+  const lead = (first.getDay() + 6) % 7; const n = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate(); const today = todayStr();
+  let cells = '<span></span>'.repeat(lead);
+  for (let i = 1; i <= n; i++) {
+    const dt = new Date(first.getFullYear(), first.getMonth(), i); const s = ymd(dt); const wk = dt.getDay() === 0 || dt.getDay() === 6;
+    const off = wk || s < today; const sel = S.draft && S.draft.date === s;
+    cells += off ? `<span class="cal-d off" aria-disabled="true">${i}</span>` : `<button type="button" class="cal-d${sel ? ' sel' : ''}${s === today ? ' today' : ''}" data-cal="${s}" aria-label="${esc(parseDate(s).toLocaleDateString('nl-BE', { weekday: 'long', day: 'numeric', month: 'long' }))}">${i}</button>`;
+  }
+  return `<div class="cal-head"><button type="button" class="cal-nav" data-act="cal-prev" aria-label="Vorige maand" ${m <= 0 ? 'disabled' : ''}>‹</button><b>${esc(title)}</b><button type="button" class="cal-nav" data-act="cal-next" aria-label="Volgende maand" ${m >= 12 ? 'disabled' : ''}>›</button></div>
+    <div class="cal-grid">${['ma', 'di', 'wo', 'do', 'vr', 'za', 'zo'].map((x) => `<span class="cal-w">${x}</span>`).join('')}${cells}</div>
+    <p class="muted small">Weekends en voorbije dagen kun je niet kiezen.</p>`;
+}
+function renderSheet() {
+  let w = $('#sheet'); const sh = S.sheet;
+  if (!w) { w = document.createElement('div'); w.className = 'sheet-wrap'; w.id = 'sheet'; w.hidden = true; document.body.appendChild(w); } // ook als een oude index.html in het geheugen zit
+  if (!sh) { w.hidden = true; w.innerHTML = ''; return; }
+  const head = (title) => `<div class="sheet-head"><b id="sheet-t">${title}</b><button type="button" class="linkbtn" data-act="sheet-close">Sluiten</button></div>`;
+  w.innerHTML = sh.kind === 'sport'
+    ? `<div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-t">${head('Andere sport')}
+        <input class="text" id="sportq" type="search" placeholder="Zoek een sport, bv. tennis" autocomplete="off" autocapitalize="off" spellcheck="false" value="${esc(sh.q)}">
+        <div class="sheet-list" id="sportlist">${sportListHtml(sh.q)}</div></div>`
+    : `<div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-t">${head('Andere datum')}${calHtml(sh.m)}</div>`;
+  w.hidden = false;
+}
+document.addEventListener('click', (e) => { const el = e.target.closest('[data-tab],[data-join],[data-open],[data-set],[data-act],[data-pop],[data-period],[data-filter],[data-comp],[data-admco],[data-installos],[data-sport],[data-cal]'); if (el) { e.stopPropagation(); handle(el); } });
 document.addEventListener('keydown', (e) => {
   if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[data-open]')) { e.preventDefault(); handle(e.target); }
   if (e.key === 'Enter' && ['wfirst', 'wlast', 'wcomp'].includes(e.target.id)) { e.preventDefault(); handle($('[data-act="welcome"]')); }
   if (e.key === 'Enter' && e.target.id === 'admcode') { e.preventDefault(); handle($('[data-act="admlogin"]')); }
+  if (e.key === 'Escape' && S.sheet) closeSheet();
+  if (e.key === 'Enter' && e.target.id === 'sportq' && S.sheet) { e.preventDefault(); const first = $('#sportlist [data-sport]'); if (first) handle(first); }
+  if (e.key === 'Enter' && ['ctime', 'cdur', 'cplace'].includes(e.target.id)) { e.preventDefault(); e.target.blur(); }
 });
+// tik naast het paneel = sluiten
+document.addEventListener('click', (e) => { if (e.target.id === 'sheet') closeSheet(); });
 // aanmeldvelden bijhouden terwijl je typt (en de bedrijfsvoorstellen bijwerken)
 document.addEventListener('input', (e) => {
+  if (e.target.id === 'sportq' && S.sheet) { S.sheet.q = e.target.value; const l = $('#sportlist'); if (l) { l.innerHTML = sportListHtml(S.sheet.q); l.scrollTop = 0; } return; }
+  if (draftInput(e.target.id, e.target.value)) return;
   const k = { wfirst: 'first', wlast: 'last', wcomp: 'company' }[e.target.id]; if (!k) return;
   S.signup = { ...(S.signup || {}), [k]: e.target.value };
   if (k === 'company') { const sg = $('#sugg'); if (sg) sg.innerHTML = suggHtml(); }
 });
-document.addEventListener('change', (e) => { if (e.target.id === 'photo-in') { const f = e.target.files && e.target.files[0]; e.target.value = ''; handlePhoto(f); return; } if ((e.target.id === 'ctime' || e.target.id === 'cplace') && S.draft) { readDraftInputs(); render(); } });
+document.addEventListener('change', (e) => { if (e.target.id === 'photo-in') { const f = e.target.files && e.target.files[0]; e.target.value = ''; handlePhoto(f); } });
 window.addEventListener('hashchange', () => { if (location.hash === '#dashboard') { S.tab = 'dash'; S.detail = null; S.draft = null; render(); } else openFromHash(); });
 // tik op een melding → de app opent bij die activiteit (#a=<id>)
 function openFromHash() {
   const m = /^#a=([A-Za-z0-9_-]+)/.exec(location.hash); if (!m) return;
   S.detail = m[1]; S.draft = null; S.tab = 'agenda'; history.replaceState(null, '', location.pathname + location.search);
-  if (S.mode !== 'loading') { render(); window.scrollTo(0, 0); }
+  if (S.mode !== 'loading') { render(); toTop(); }
 }
 if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', (e) => { if (e.data && e.data.type === 'open' && e.data.hash) { location.hash = e.data.hash; } });
 // herinnering 10 minuten voor de start van iets waaraan je meedoet
@@ -969,7 +1097,7 @@ function checkReminders() {
       S.reminded.add(a.id); ls.set('wb-reminded', JSON.stringify([...S.reminded].slice(-200)));
       S.notifQ.push({ id: a.id, kind: 'remind' }); showPop(); chime();
       try { if (navigator.vibrate) navigator.vibrate([200, 80, 200]); } catch (e) {}
-      if (document.hidden) { document.title = '⏰ Over ' + left + ' min · ' + BASE_TITLE; try { if ('Notification' in window && Notification.permission === 'granted') new Notification(`Over ${left} minuten: ${(TYPES[a.type] || TYPES.wandelen).label.toLowerCase()}`, { body: `Vertrek aan ${a.place}`, tag: 'r' + a.id }); } catch (e) {} }
+      if (document.hidden) { document.title = '⏰ Over ' + left + ' min · ' + BASE_TITLE; try { if ('Notification' in window && Notification.permission === 'granted') new Notification(`Over ${left} minuten: ${typeInfo(a).label.toLowerCase()}`, { body: `Vertrek aan ${a.place}`, tag: 'r' + a.id }); } catch (e) {} }
       store.track('reminder_shown', { act: a.id });
     }
   }
@@ -980,7 +1108,7 @@ setInterval(() => {
   if (S.mode === 'loading') return;
   checkReminders();
   const day = todayStr();
-  if (day !== lastDay) { lastDay = day; if (S.draft) { S.draft.date = draftDays()[0]; render(); return; } }
+  if (day !== lastDay) { lastDay = day; if (S.draft && S.draft.date < day) { S.draft.date = draftDays()[0]; render(); return; } }
   if (!S.draft) refresh();
 }, 20000);
 

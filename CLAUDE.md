@@ -16,6 +16,10 @@ Webapp waarin collega's een middagwandeling of andere activiteit plannen. Andere
 - `styles.css`: alle opmaak.
 - `app.js`: alle logica (ES-module).
 - `firebase-config.js`: publieke Firebase web-config (`export const firebaseConfig`). Moet blijven werken.
+- `sports.js`: lijst "Andere sport" (272 sporten, Nederlands) met categorie → icoon (`CAT_ICONS`) en stappen/minuut (`CAT_SPM`).
+- Opbouw als telefoon-app: de pagina scrolt nooit, alleen `#main` scrolt; de balk `.nav` is het onderste stuk (niet `position: fixed`). Naar boven scrollen = `toTop()`, niet `window.scrollTo`.
+- Activiteit: `type` = wandelen | lopen | padel | fietsen | stretch (= "Yoga") | sport; `label` = de naam (bij "sport" de gekozen sport). Gebruik altijd `typeInfo(a)` voor naam, icoon, kleur, stappen en duurknoppen.
+- Plannen: vertrekpunt start leeg en wordt nooit automatisch ingevuld. "Ander uur" begrijpt 1340, 13:40, 13u40, 13.40 (`parseTime`); "Andere duur" 5–240 min (`parseDur`). Tijdens het typen alleen `syncDraft()` (geen volledige render, anders sluit het toetsenbord op iPhone).
 
 - `manifest.json`, `sw.js` (service worker) en `icons/` maken er een installeerbare web-app van. De service worker haalt eigen bestanden altijd eerst vers op (network-first) en cachet alleen de Firebase-bibliotheek; Firestore gaat er nooit door. Het browservenster in de Claude-app ondersteunt geen service workers: test die op de echte site of op een telefoon.
 

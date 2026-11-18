@@ -3,8 +3,8 @@
 //   zonder internet valt hij terug op de bewaarde kopie.
 // - De Firebase-bibliotheek (vaste versie) wordt bewaard, zodat de app sneller opent.
 // - Gegevens uit de database (Firestore) gaan nooit via deze cache.
-const CACHE = 'wandelbuddy-v2';
-const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'firebase-config.js', 'push-config.js', 'manifest.json', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
+const CACHE = 'wandelbuddy-v3';
+const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'firebase-config.js', 'push-config.js', 'sports.js', 'manifest.json', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
