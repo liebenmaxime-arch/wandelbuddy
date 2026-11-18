@@ -21,7 +21,9 @@ Webapp waarin collega's een middagwandeling of andere activiteit plannen. Andere
 - Firestore, gratis Spark-plan, project `wandelbuddy-9c08c`.
 - Collecties: `activities`, `joins`, `users`, `views`, `events`, `config`.
 - Zonder geldige config valt de app terug op een lokale demo (localStorage).
-- Lokaal testen: `python3 -m http.server 8080` in de projectmap en open `http://127.0.0.1:8080/`. Let op: lokaal testen gebruikt de echte database. Maak testdata herkenbaar en ruim ze op.
+- Lokaal testen: `python3 -m http.server 8080` in de projectmap en open `http://127.0.0.1:8080/`. Let op: lokaal testen gebruikt de echte database. Maak testdata herkenbaar (bedrijf "Testbedrijf Claude") en houd ze zo klein mogelijk.
+- De huidige databaseregels laten NIET toe dat de app `users`, `events` of `views` verwijdert. Testdata daarin kan alleen via de Firebase-console weg (of later via een beheerdersaccount).
+- Aanmelden: profiel-id `u_…` staat in localStorage `wb-pid`; Firebase Anonymous Auth-uid's komen in `users/{id}.authUids`. Profielen worden herkend op `nameKey` (genormaliseerde voornaam+achternaam) en `companyKey` (genormaliseerd bedrijf, zie `norm()` in app.js).
 
 ## Regels
 - Alles GRATIS: geen betaalplannen, geen kredietkaart, geen App Store of Google Play. Geen Firebase Cloud Functions, geen Firebase Storage.

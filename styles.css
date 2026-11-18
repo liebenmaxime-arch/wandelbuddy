@@ -151,6 +151,10 @@ body { margin: 0; -webkit-tap-highlight-color: transparent; }
 .welcome { display: flex; flex-direction: column; gap: 16px; padding-top: 10px; }
 .welcome .logo { width: 64px; height: 64px; border-radius: 20px; background: var(--green); color: var(--green-ink); display: grid; place-items: center; }
 .welcome .logo svg { width: 36px; height: 36px; }
+.sugg { display: flex; flex-wrap: wrap; gap: 8px; }
+.sugg:empty { display: none; }
+.sugg-h { width: 100%; font-size: 12px; font-weight: 700; color: var(--muted); }
+.sugg-i { border: 1.5px solid var(--green); background: var(--green-soft); color: var(--green); border-radius: 12px; padding: 9px 13px; font-weight: 800; }
 
 /* pop-up melding */
 .pop-wrap { position: fixed; inset: 0; z-index: 40; display: flex; align-items: flex-start; justify-content: center; padding: calc(14px + env(safe-area-inset-top, 0px)) 14px 14px; background: rgba(10, 20, 15, .28); }

@@ -65,8 +65,24 @@ function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = fal
 async function loadFirebase(cfg) {
   const A = await import(`https://www.gstatic.com/firebasejs/${FB_VER}/firebase-app.js`);
   const F = await import(`https://www.gstatic.com/firebasejs/${FB_VER}/firebase-firestore.js`);
+  const Au = await import(`https://www.gstatic.com/firebasejs/${FB_VER}/firebase-auth.js`);
   const app = A.initializeApp(cfg);
-  return { F, db: F.getFirestore(app) };
+  return { F, db: F.getFirestore(app), Au, auth: Au.getAuth(app) };
+}
+// Anoniem aanmelden bij Firebase (gratis). Blijft bewaard op dit toestel.
+async function signInAnon(Au, auth) {
+  const go = (async () => { await auth.authStateReady(); if (!auth.currentUser) await Au.signInAnonymously(auth); return auth.currentUser.uid; })();
+  try { return await Promise.race([go, new Promise((_, no) => setTimeout(() => no(new Error('timeout')), 8000))]); }
+  catch (e) { console.warn('Anoniem aanmelden bij Firebase lukt niet:', (e && e.code) || e); return null; }
+}
+// Vergelijken zonder hoofdletters, spaties, leestekens of accenten: "U Hasselt" = "uhasselt".
+const norm = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+const userNameKey = (u) => (u && (u.nameKey || norm(u.name))) || '';
+const userCompKey = (u) => (u && (u.companyKey || norm(u.company))) || '';
+function companies() {
+  const m = new Map();
+  for (const u of Object.values(S.users)) { const k = userCompKey(u); if (k && u.company && !m.has(k)) m.set(k, u.company.trim()); }
+  return [...m].map(([key, name]) => ({ key, name })).sort((a, b) => a.name.localeCompare(b.name, 'nl'));
 }
 
 // ---------- sound ----------
@@ -88,7 +104,7 @@ function chime() {
 // ---------- state ----------
 const S = { mode: 'loading', me: null, users: {}, acts: [], joins: [], views: [], events: [], cfg: null, loadedActs: false,
   tab: 'agenda', detail: null, draft: null, offline: false, denied: false, confirmDel: false, justAdded: null,
-  period: '7', filter: 'all', notifQ: [], reminded: new Set(JSON.parse(ls.get('wb-reminded') || '[]')), editProfile: false, seen: new Set(), cfgFile: firebaseConfig && firebaseConfig.apiKey && firebaseConfig.projectId ? firebaseConfig : null };
+  period: '7', filter: 'all', notifQ: [], reminded: new Set(JSON.parse(ls.get('wb-reminded') || '[]')), seen: new Set(), cfgFile: firebaseConfig && firebaseConfig.apiKey && firebaseConfig.projectId ? firebaseConfig : null };
 let store = null;
 const BASE_TITLE = document.title;
 
@@ -127,6 +143,7 @@ function localStore() {
   return {
     start() { S.me = 'me'; push(); },
     async profile(p) { data.users.me = { ...data.users.me, ...p }; push(); },
+    touch() {},
     async create(a) { const id = 'l' + Date.now(); data.acts.push({ ...a, id, by: 'me', createdAt: Date.now() }); data.joins.push({ id: `${id}__me`, act: id, uid: 'me', steps: null, at: Date.now() }); push(); return id; },
     async join(act) { if (!data.joins.find((x) => x.id === `${act}__me`)) data.joins.push({ id: `${act}__me`, act, uid: 'me', steps: null, at: Date.now() }); push(); },
     async leave(act) { data.joins = data.joins.filter((x) => x.id !== `${act}__me`); push(); },
@@ -145,7 +162,8 @@ function localStore() {
 
 // ---------- gedeelde store (Firebase Firestore) ----------
 function sharedStore(F, db) {
-  const { collection, doc, setDoc, updateDoc, deleteDoc, addDoc, onSnapshot, query, orderBy, limit } = F;
+  const { collection, doc, setDoc, deleteDoc, addDoc, onSnapshot, query, orderBy, limit, arrayUnion } = F;
+  const authExtra = () => (S.authUid ? { authUids: arrayUnion(S.authUid) } : {});
   const t0 = Date.now();
   const timer = setTimeout(() => { if (!S.loadedActs) { S.offline = true; refresh(); } }, 10000);
   const fail = (e) => { console.error(e); if (e && e.code === 'permission-denied') S.denied = true; S.offline = true; refresh(); };
@@ -163,12 +181,18 @@ function sharedStore(F, db) {
         S.loadedActs = true; S.offline = false; S.denied = false; clearTimeout(timer); refresh();
       }, fail);
       onSnapshot(collection(db, 'joins'), (s) => { S.joins = rows(s); refresh(); }, fail);
-      onSnapshot(collection(db, 'users'), (s) => { const u = {}; s.docs.forEach((d) => { u[d.id] = d.data(); }); S.users = u; refresh(); }, fail);
+      onSnapshot(collection(db, 'users'), (s) => { const u = {}; s.docs.forEach((d) => { u[d.id] = d.data(); }); S.users = u; S.loadedUsers = true; refresh(); }, fail);
       onSnapshot(collection(db, 'views'), (s) => { S.views = rows(s); for (const v of S.views) if (v.uid === S.me) S.seen.add(v.act); refresh(); }, () => {});
       onSnapshot(query(collection(db, 'events'), orderBy('at', 'desc'), limit(5000)), (s) => { S.events = rows(s); if (S.tab === 'dash') refresh(); }, () => {});
       onSnapshot(doc(db, 'config', 'main'), (d) => { S.cfg = d.exists() ? d.data() : null; refresh(); }, () => {});
     },
     async profile(p) { await wrap(setDoc(doc(db, 'users', S.me), p, { merge: true })); },
+    // nieuw profiel maken, of een bestaand profiel overnemen op dit toestel
+    async signup(p, pid, id) {
+      if (pid) return wrap(setDoc(doc(db, 'users', pid), { ...p, lastSeen: Date.now(), ...authExtra() }, { merge: true }));
+      return wrap(setDoc(doc(db, 'users', id), { ...p, joinedAt: Date.now(), lastSeen: Date.now(), ...authExtra() }));
+    },
+    async touch() { try { await setDoc(doc(db, 'users', S.me), { lastSeen: Date.now(), ...authExtra() }, { merge: true }); } catch (e) {} },
     async create(a) {
       const ref = doc(collection(db, 'activities')); const data = { ...a, by: S.me, createdAt: Date.now() };
       await wrap(setDoc(ref, data));
@@ -194,7 +218,7 @@ const actById = (id) => S.acts.find((a) => a.id === id);
 const goingOf = (id) => S.joins.filter((j) => j.act === id && actById(id));
 const iJoined = (id) => S.joins.some((j) => j.act === id && j.uid === S.me);
 const nameOf = (u) => (u === S.me ? 'Jij' : (S.users[u] && S.users[u].name) || 'Collega');
-const realName = (u) => (S.users[u] && S.users[u].name) || (u === S.me ? (S.mode === 'shared' && ls.get('wb-name')) || 'Jij' : 'Collega');
+const realName = (u) => (S.users[u] && S.users[u].name) || (u === S.me ? 'Jij' : 'Collega');
 function mine() {
   const myJoins = S.joins.filter((j) => j.uid === S.me && actById(j.act));
   const done = myJoins.filter((j) => isPast(actById(j.act)));
@@ -257,7 +281,7 @@ function showPop() {
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) { document.title = BASE_TITLE; if (S.mode === 'shared' && S.me && Date.now() - (S.lastOpen || 0) > 30 * 60000) trackOpen(); refresh(); }
 });
-function trackOpen() { S.lastOpen = Date.now(); store.track('open'); if (S.mode === 'shared') { const p = { lastSeen: Date.now() }; if (ls.get('wb-name')) { p.name = ls.get('wb-name'); p.company = ls.get('wb-company') || ''; } store.profile(p).catch(() => {}); } }
+function trackOpen() { if (!S.me) return; S.lastOpen = Date.now(); store.track('open'); store.touch(); }
 
 // ---------- schermen ----------
 function avatars(uids) {
@@ -281,17 +305,74 @@ function banner() {
   if (S.offline) return `<div class="banner"><b>Geen verbinding</b>De activiteiten zijn nog niet geladen. Wat je ziet, is misschien niet actueel.</div>`;
   return '';
 }
+// ---------- aanmelden ----------
+function suggHtml() {
+  const typed = (S.signup && S.signup.company) || ''; const q = norm(typed);
+  if (!q) return '';
+  const list = companies().filter((c) => c.key.includes(q)).slice(0, 6);
+  if (!list.length || (list.length === 1 && list[0].key === q && list[0].name === typed.trim())) return '';
+  return `<span class="sugg-h">Bestaande bedrijven</span>` + list.map((c) => `<button type="button" class="sugg-i" data-comp="${esc(c.name)}">${esc(c.name)}</button>`).join('');
+}
 function vWelcome() {
-  const u = S.users[S.me] || {}; const editing = S.editProfile;
+  if (S.claim) {
+    const pid = S.claim.pid; const u = S.users[pid] || {};
+    const n = S.joins.filter((j) => j.uid === pid && actById(j.act)).length;
+    const since = u.joinedAt ? 'sinds ' + new Date(u.joinedAt).toLocaleDateString('nl-BE', { day: 'numeric', month: 'long' }) : '';
+    const info = [esc(u.company || ''), n ? `${n} keer meegedaan` : '', since].filter(Boolean).join(' · ');
+    return `<div class="welcome">
+      <div class="logo">${ICON.wandelen}</div>
+      <div><h1>Ben jij dit?</h1><p class="muted" style="margin-top:6px">Er bestaat al een profiel met deze naam bij dit bedrijf.</p></div>
+      <div class="me-row"><div class="av" style="background:${colorFor(pid)}">${esc(initials(u.name))}</div>
+        <div class="grow"><b>${esc(u.name || '')}</b><small class="muted" style="display:block">${info}</small></div></div>
+      <button class="primary" type="button" data-act="claim-yes">Ja, dat ben ik</button>
+      <button class="secondary" type="button" data-act="claim-no">Nee, ik ben iemand anders</button>
+      <button class="back" type="button" data-act="claim-back" style="align-self:center">‹ Terug</button>
+    </div>`;
+  }
+  const f = S.signup || (S.signup = { first: '', last: '', company: '' });
   return `<div class="welcome">
     <div class="logo">${ICON.wandelen}</div>
-    <div><h1>${editing ? 'Je gegevens' : 'Welkom bij Wandelbuddy'}</h1>
-      <p class="muted" style="margin-top:6px">${editing ? 'Je naam is zichtbaar voor iedereen in de testgroep.' : 'Plan een middagwandeling of zie wie er vandaag gaat, en doe met één tik mee. Vul gewoon je naam in, een account is niet nodig.'}</p></div>
-    <label class="field"><span>Je naam</span><input class="text" id="wname" type="text" maxlength="40" autocomplete="name" placeholder="bv. Sarah Peeters" value="${esc(u.name || ls.get('wb-name') || '')}"></label>
-    <label class="field"><span>Bedrijf (optioneel)</span><input class="text" id="wcomp" type="text" maxlength="60" autocomplete="organization" placeholder="bv. Bureau Noord" value="${esc(u.company || ls.get('wb-company') || '')}"></label>
-    <button class="primary" type="button" data-act="welcome">${editing ? 'Opslaan' : 'Start'}</button>
-    ${editing ? '<button class="back" type="button" data-act="home" style="align-self:center">Annuleren</button>' : '<p class="note">Je naam wordt op dit toestel onthouden. Wie de app opent, ziet welke activiteiten gepland zijn en wie meedoet.</p>'}
+    <div><h1>Welkom bij Wandelbuddy</h1>
+      <p class="muted" style="margin-top:6px">Plan een middagwandeling of zie wie er vandaag gaat, en doe met één tik mee. Vul je naam en je bedrijf in, een wachtwoord is niet nodig.</p></div>
+    <label class="field"><span>Voornaam</span><input class="text" id="wfirst" type="text" maxlength="30" autocomplete="given-name" autocapitalize="words" placeholder="bv. Sarah" value="${esc(f.first)}"></label>
+    <label class="field"><span>Achternaam</span><input class="text" id="wlast" type="text" maxlength="40" autocomplete="family-name" autocapitalize="words" placeholder="bv. Peeters" value="${esc(f.last)}"></label>
+    <div class="field"><span id="wcomp-l">Bedrijf</span>
+      <input class="text" id="wcomp" aria-labelledby="wcomp-l" type="text" maxlength="60" autocomplete="off" autocapitalize="words" placeholder="bv. UHasselt" value="${esc(f.company)}">
+      <div class="sugg" id="sugg">${suggHtml()}</div></div>
+    <button class="primary" type="button" data-act="welcome">Start</button>
+    <p class="note">Je blijft aangemeld op dit toestel. Je collega's zien je naam bij de activiteiten waaraan je meedoet.</p>
   </div>`;
+}
+const cleanTxt = (s, n) => String(s || '').replace(/\s+/g, ' ').trim().slice(0, n);
+async function submitSignup() {
+  const f = S.signup || {};
+  const first = cleanTxt(f.first, 30), last = cleanTxt(f.last, 40), compIn = cleanTxt(f.company, 60);
+  if (!first) { toast('Vul je voornaam in.'); $('#wfirst')?.focus(); return; }
+  if (!last) { toast('Vul je achternaam in.'); $('#wlast')?.focus(); return; }
+  if (!norm(compIn)) { toast('Vul je bedrijf in.'); $('#wcomp')?.focus(); return; }
+  if (!S.loadedUsers) { toast('Even geduld, de app laadt nog. Probeer zo opnieuw.'); return; }
+  const companyKey = norm(compIn); const known = companies().find((c) => c.key === companyKey);
+  const nameKey = norm(first + last);
+  S.pendingProfile = { name: `${first} ${last}`, first, last, company: known ? known.name : compIn, nameKey, companyKey };
+  const match = Object.entries(S.users).filter(([, u]) => userNameKey(u) === nameKey && userCompKey(u) === companyKey)
+    .sort((a, b) => (b[1].lastSeen || 0) - (a[1].lastSeen || 0))[0];
+  if (match) { S.claim = { pid: match[0] }; render(); window.scrollTo(0, 0); return; }
+  await finishSignup(null);
+}
+async function finishSignup(pid) {
+  const p = S.pendingProfile; if (!p) return;
+  const old = pid ? S.users[pid] || {} : null;
+  // bij een bestaand profiel blijft de oorspronkelijke schrijfwijze van naam en bedrijf bewaard
+  const data = pid ? { nameKey: p.nameKey, companyKey: p.companyKey, ...(old.first ? {} : { first: p.first, last: p.last }), ...(old.company ? {} : { company: p.company }), ...(old.name ? {} : { name: p.name }) } : p;
+  // meteen binnenlaten; het bewaren gebeurt op de achtergrond
+  const id = pid || 'u_' + rid();
+  const saving = store.signup(data, pid, id);
+  ls.set('wb-pid', id); S.me = id; S.users[id] = { ...(old || {}), ...data, ...(pid ? {} : { joinedAt: Date.now() }) };
+  S.claim = null; S.signup = null; S.pendingProfile = null;
+  render(); window.scrollTo(0, 0);
+  toast(pid ? `Welkom terug, ${p.first}!` : `Welkom, ${p.first}!`);
+  try { await saving; trackOpen(); }
+  catch (e) { try { localStorage.removeItem('wb-pid'); } catch (x) {} S.me = null; S.signup = { first: p.first, last: p.last, company: p.company }; render(); }
 }
 function vAgenda() {
   const t = todayStr();
@@ -423,8 +504,7 @@ function vSamen() {
     <div class="badges">${BADGES.map((b) => `<div class="badge ${earned[b.id] ? 'on' : ''}"><div class="medal">${medal}</div><div><b>${b.name}</b><span>${earned[b.id] ? 'Behaald' : b.how}</span></div></div>`).join('')}</div>
     <h2>Instellingen</h2>
     <div class="me-row"><div class="av" style="background:${colorFor(S.me)}">${esc(initials(realName(S.me)))}</div>
-      <div class="grow"><b>${esc(realName(S.me))}</b><small class="muted" style="display:block">${esc(u.company || 'Geen bedrijf ingevuld')}</small></div>
-      ${S.mode === 'shared' ? '<button class="pill in" type="button" data-act="profile">Wijzig</button>' : ''}</div>
+      <div class="grow"><b>${esc(realName(S.me))}</b><small class="muted" style="display:block">${esc(u.company || 'Geen bedrijf ingevuld')}</small></div></div>
     ${canNotif ? '<button class="secondary" type="button" data-act="notifperm">Meldingen ook tonen als de app op de achtergrond staat</button>' : ''}
     ${S.mode === 'local' ? '<button class="secondary" type="button" data-act="simulate">Simuleer: een collega plant een wandeling</button>' : ''}
     <button class="secondary" type="button" data-tab="dash">Managementdashboard bekijken</button>
@@ -532,8 +612,8 @@ function csvDownload(name, rows) {
 
 // ---------- render ----------
 let lastKey = '';
-const viewKey = () => (needsWelcome() ? 'welcome' : S.draft ? 'draft' : S.detail ? 'detail:' + S.detail : 'tab:' + S.tab);
-const needsWelcome = () => S.mode === 'shared' && (S.editProfile || !ls.get('wb-name') && !(S.users[S.me] && S.users[S.me].name));
+const viewKey = () => (needsWelcome() ? (S.claim ? 'claim' : 'welcome') : S.draft ? 'draft' : S.detail ? 'detail:' + S.detail : 'tab:' + S.tab);
+const needsWelcome = () => S.mode === 'shared' && !S.me;
 function render(preserve = false) {
   if (S.mode === 'loading') return;
   const main = $('#main'); const key = viewKey();
@@ -553,7 +633,7 @@ function render(preserve = false) {
   openD.forEach((id) => { const d = document.getElementById(id); if (d) d.open = true; });
   if (focusId) { const el = document.getElementById(focusId); if (el) { el.focus({ preventScroll: true }); try { if (selS != null) el.setSelectionRange(selS, selE); } catch (e) {} } }
   lastKey = key;
-  const bare = key === 'welcome';
+  const bare = needsWelcome();
   $('.nav').hidden = bare;
   document.querySelectorAll('.tab').forEach((b) => b.setAttribute('aria-current', !S.draft && !S.detail && b.dataset.tab === (S.tab === 'dash' ? 'samen' : S.tab) ? 'page' : 'false'));
   if (S.notifQ.length) showPop();
@@ -578,6 +658,7 @@ async function handle(el) {
     if (!S.notifQ.length) document.title = BASE_TITLE;
     showPop(); return;
   }
+  if (el.dataset.comp) { S.signup = { ...(S.signup || {}), company: el.dataset.comp }; const c = $('#wcomp'); if (c) c.value = el.dataset.comp; const sg = $('#sugg'); if (sg) sg.innerHTML = suggHtml(); return; }
   if (el.dataset.filter) { S.filter = el.dataset.filter; render(); return; }
   if (el.dataset.period) { S.period = el.dataset.period; render(); return; }
   if (el.dataset.tab) { S.tab = el.dataset.tab; S.detail = null; S.draft = null; history.replaceState(null, '', S.tab === 'dash' ? '#dashboard' : location.pathname + location.search); render(); window.scrollTo(0, 0); return; }
@@ -592,19 +673,12 @@ async function handle(el) {
     readDraftInputs(); S.draft[k] = v; render(); return;
   }
   const act = el.dataset.act;
-  if (act === 'home') { S.detail = null; S.draft = null; S.editProfile = false; render(); return; }
+  if (act === 'home') { S.detail = null; S.draft = null; render(); return; }
   if (act === 'new') { const ns = nextSlot(); S.draft = { type: 'wandelen', date: ns.date, time: ns.time, dur: 20, place: 'Inkom', note: '' }; S.detail = null; render(); window.scrollTo(0, 0); return; }
-  if (act === 'welcome') {
-    const name = $('#wname').value.trim().slice(0, 40); const company = $('#wcomp').value.trim().slice(0, 60);
-    if (name.length < 2) { toast('Vul je naam in, zodat collega\'s weten wie meedoet.'); $('#wname').focus(); return; }
-    ls.set('wb-name', name); ls.set('wb-company', company);
-    const first = !S.editProfile && !(S.users[S.me] && S.users[S.me].joinedAt);
-    S.users[S.me] = { ...(S.users[S.me] || {}), name, company };
-    S.editProfile = false; render();
-    try { await store.profile({ name, company, lastSeen: Date.now(), ...(first ? { joinedAt: Date.now() } : {}) }); if (first) toast(`Welkom, ${name.split(' ')[0]}!`); else toast('Opgeslagen.'); } catch (e) {}
-    return;
-  }
-  if (act === 'profile') { S.editProfile = true; render(); window.scrollTo(0, 0); return; }
+  if (act === 'welcome') { el.disabled = true; try { await submitSignup(); } finally { el.disabled = false; } return; }
+  if (act === 'claim-yes') { el.disabled = true; await finishSignup(S.claim && S.claim.pid); return; }
+  if (act === 'claim-no') { el.disabled = true; await finishSignup(null); return; }
+  if (act === 'claim-back') { S.claim = null; render(); return; }
   if (act === 'post') {
     readDraftInputs(); const d = S.draft;
     if (!d.place.trim()) { toast('Kies of typ een vertrekpunt.'); return; }
@@ -648,10 +722,16 @@ function readDraftInputs() {
   const n = $('#cnote'); if (n) S.draft.note = n.value;
   const t = $('#ctime'); if (t && t.value) S.draft.time = t.value;
 }
-document.addEventListener('click', (e) => { const el = e.target.closest('[data-tab],[data-join],[data-open],[data-set],[data-act],[data-pop],[data-period],[data-filter]'); if (el) { e.stopPropagation(); handle(el); } });
+document.addEventListener('click', (e) => { const el = e.target.closest('[data-tab],[data-join],[data-open],[data-set],[data-act],[data-pop],[data-period],[data-filter],[data-comp]'); if (el) { e.stopPropagation(); handle(el); } });
 document.addEventListener('keydown', (e) => {
   if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[data-open]')) { e.preventDefault(); handle(e.target); }
-  if (e.key === 'Enter' && (e.target.id === 'wname' || e.target.id === 'wcomp')) { e.preventDefault(); handle($('[data-act="welcome"]')); }
+  if (e.key === 'Enter' && ['wfirst', 'wlast', 'wcomp'].includes(e.target.id)) { e.preventDefault(); handle($('[data-act="welcome"]')); }
+});
+// aanmeldvelden bijhouden terwijl je typt (en de bedrijfsvoorstellen bijwerken)
+document.addEventListener('input', (e) => {
+  const k = { wfirst: 'first', wlast: 'last', wcomp: 'company' }[e.target.id]; if (!k) return;
+  S.signup = { ...(S.signup || {}), [k]: e.target.value };
+  if (k === 'company') { const sg = $('#sugg'); if (sg) sg.innerHTML = suggHtml(); }
 });
 document.addEventListener('change', (e) => { if ((e.target.id === 'ctime' || e.target.id === 'cplace') && S.draft) { readDraftInputs(); render(); } });
 window.addEventListener('hashchange', () => { if (location.hash === '#dashboard') { S.tab = 'dash'; S.detail = null; S.draft = null; render(); } });
@@ -687,10 +767,10 @@ async function boot() {
   const cfg = S.cfgFile;
   if (cfg) {
     try {
-      const { F, db } = await loadFirebase(cfg);
-      let uid = ls.get('wb-uid'); if (!uid) { uid = 'u_' + rid(); ls.set('wb-uid', uid); }
-      S.mode = 'shared'; S.me = uid; store = sharedStore(F, db); store.start(); render();
-      if (ls.get('wb-name')) { trackOpen(); } else { const w = setInterval(() => { if (ls.get('wb-name')) { clearInterval(w); trackOpen(); } }, 1000); }
+      const { F, db, Au, auth } = await loadFirebase(cfg);
+      S.authUid = await signInAnon(Au, auth);
+      S.mode = 'shared'; S.me = ls.get('wb-pid') || null; store = sharedStore(F, db); store.start(); render();
+      trackOpen();
       return;
     } catch (e) {
       console.error(e);
