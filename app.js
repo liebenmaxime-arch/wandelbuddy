@@ -55,7 +55,8 @@ function nextSlot() { const n = new Date(); const now = n.getHours() * 60 + n.ge
 const estSteps = (a) => Math.round((TYPES[a.type]?.spm || 0) * a.dur / 100) * 100;
 // Voorbeeld: stappen komen "automatisch binnen" na afloop. In de echte app komen ze van de gsm zelf.
 const hashN = (s) => { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h; };
-const stepsOf = (j) => { const a = actById(j.act); if (!a || !isPast(a)) return 0; if (j.steps) return j.steps; const base = estSteps(a); return base ? Math.round(base * (0.85 + (hashN(j.act + j.uid) % 31) / 100) / 10) * 10 : 0; };
+const stepsOf = (j) => stepsOfAct(j, actById(j.act));
+const stepsOfAct = (j, a) => { if (!a || !isPast(a)) return 0; if (j.steps) return j.steps; const base = estSteps(a); return base ? Math.round(base * (0.85 + (hashN(j.act + j.uid) % 31) / 100) / 10) * 10 : 0; };
 const AUTO_NOTE = 'Stappen worden automatisch gekoppeld';
 const ls = { get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} } };
 const rid = (n = 14) => { const a = new Uint8Array(n); crypto.getRandomValues(a); return Array.from(a, (b) => 'abcdefghijkmnpqrstuvwxyz23456789'[b % 32]).join(''); };
@@ -67,7 +68,7 @@ async function loadFirebase(cfg) {
   const F = await import(`https://www.gstatic.com/firebasejs/${FB_VER}/firebase-firestore.js`);
   const Au = await import(`https://www.gstatic.com/firebasejs/${FB_VER}/firebase-auth.js`);
   const app = A.initializeApp(cfg);
-  return { F, db: F.getFirestore(app), Au, auth: Au.getAuth(app) };
+  return { A, F, db: F.getFirestore(app), Au, auth: Au.getAuth(app) };
 }
 // Anoniem aanmelden bij Firebase (gratis). Blijft bewaard op dit toestel.
 async function signInAnon(Au, auth) {
@@ -99,7 +100,7 @@ function chime() {
 // ---------- state ----------
 const S = { mode: 'loading', me: null, users: {}, acts: [], joins: [], views: [], events: [], cfg: null, loadedActs: false,
   tab: 'agenda', detail: null, draft: null, offline: false, denied: false, confirmDel: false, justAdded: null,
-  period: '7', filter: 'all', notifQ: [], reminded: new Set(JSON.parse(ls.get('wb-reminded') || '[]')), seen: new Set(), cfgFile: firebaseConfig && firebaseConfig.apiKey && firebaseConfig.projectId ? firebaseConfig : null };
+  period: '7', filter: 'all', notifQ: [], reminded: new Set(JSON.parse(ls.get('wb-reminded') || '[]')), seen: new Set(JSON.parse(ls.get('wb-seen') || '[]')), cfgFile: firebaseConfig && firebaseConfig.apiKey && firebaseConfig.projectId ? firebaseConfig : null };
 let store = null;
 const BASE_TITLE = document.title;
 
@@ -191,8 +192,7 @@ function sharedStore(F, db) {
       }, fail));
       stops.push(onSnapshot(col('joins'), (s) => { S.joins = rows(s); refresh(); }, fail));
       stops.push(onSnapshot(col('users'), (s) => { const u = {}; s.docs.forEach((d) => { u[d.id] = d.data(); }); S.users = u; refresh(); }, fail));
-      stops.push(onSnapshot(col('views'), (s) => { S.views = rows(s); for (const v of S.views) if (v.uid === S.me) S.seen.add(v.act); refresh(); }, () => {}));
-      stops.push(onSnapshot(query(col('events'), orderBy('at', 'desc'), limit(5000)), (s) => { S.events = rows(s); if (S.tab === 'dash') refresh(); }, () => {}));
+      // "gezien" en gebeurtenissen kan alleen een beheerder lezen (zie adminStore)
       stops.push(onSnapshot(dref('config', 'main'), (d) => { S.cfg = d.exists() ? d.data() : null; refresh(); }, () => {}));
     },
     // wie er al bestaat bij een bedrijf (voor "Ben jij dit?")
@@ -204,9 +204,9 @@ function sharedStore(F, db) {
     // nieuw profiel maken, of een bestaand profiel overnemen op dit toestel
     async signup(p, pid, id, key, isNewCompany) {
       if (isNewCompany) { try { await setDoc(doc(db, 'companies', key), { name: p.company, createdAt: Date.now() }); } catch (e) { console.warn('bedrijf bestond al', e && e.code); } }
+      await wrap(markMember(key, id)); // eerst het kaartje: de regels laten je alleen je eigen profiel schrijven
       const ref = doc(db, 'companies', key, 'users', id);
       await wrap(pid ? setDoc(ref, { ...p, lastSeen: Date.now(), ...authExtra() }, { merge: true }) : setDoc(ref, { ...p, joinedAt: Date.now(), lastSeen: Date.now(), ...authExtra() }));
-      await wrap(markMember(key, id));
     },
     async touch() { if (!ck) return; try { await markMember(ck, S.me); await setDoc(dref('users', S.me), { lastSeen: Date.now(), ...authExtra() }, { merge: true }); } catch (e) {} },
     async profile(p) { await wrap(setDoc(dref('users', S.me), p, { merge: true })); },
@@ -221,13 +221,72 @@ function sharedStore(F, db) {
     async join(act) { await wrap(setDoc(dref('joins', `${act}__${S.me}`), { act, uid: S.me, steps: null, at: Date.now() })); },
     async leave(act) { await wrap(deleteDoc(dref('joins', `${act}__${S.me}`))); },
     async remove(act) {
-      await wrap(deleteDoc(dref('activities', act)));
+      // eerst de deelnames, dan de activiteit (de regels kijken naar de activiteit om te zien wie dat mag)
       for (const j of S.joins.filter((x) => x.act === act)) { try { await deleteDoc(dref('joins', j.id)); } catch (e) {} }
+      await wrap(deleteDoc(dref('activities', act)));
     },
-    async config(c) { await wrap(setDoc(dref('config', 'main'), c, { merge: true })); },
     async view(act) { if (!ck) return; try { await setDoc(dref('views', `${act}__${S.me}`), { act, uid: S.me, at: Date.now() }); } catch (e) {} },
     async track(kind, extra = {}) { if (!ck) return; try { await addDoc(col('events'), { kind, uid: S.me, at: Date.now(), ...extra }); } catch (e) {} },
   };
+}
+
+// ---------- beheerders (managementdashboard) ----------
+// Elke beheerderscode is het wachtwoord van een e-mail/wachtwoord-account in Firebase Authentication.
+// Het e-mailadres zit verborgen in de app: beheer-<bedrijf>@… voor een bedrijf, team@… voor de hoofdcode.
+// Of een account echt beheerder is, staat in admins/{uid} (alleen aan te passen in de Firebase-console).
+// De beheerder gebruikt een aparte Firebase-sessie, zodat de gewone aanmelding op dit toestel blijft bestaan.
+const ADMIN_DOMAIN = '@wandelbuddy-9c08c.firebaseapp.com';
+function adminStore(A, F, Au, cfg) {
+  const app = A.initializeApp(cfg, 'beheer'); const auth = Au.getAuth(app); const db = F.getFirestore(app);
+  let stops = [];
+  const rows = (s) => s.docs.map((d) => ({ id: d.id, ...d.data() }));
+  const check = async () => {
+    const u = auth.currentUser; if (!u || u.isAnonymous) throw new Error('geen beheerder');
+    const d = await F.getDoc(F.doc(db, 'admins', u.uid)); if (!d.exists()) throw new Error('geen beheerder');
+    return { uid: u.uid, company: String(d.data().company || '') };
+  };
+  return {
+    async restore() { try { await auth.authStateReady(); return auth.currentUser ? await check() : null; } catch (e) { return null; } },
+    async login(code, ck) {
+      const emails = [ck ? `beheer-${ck}${ADMIN_DOMAIN}` : null, `team${ADMIN_DOMAIN}`].filter(Boolean);
+      for (const email of emails) {
+        try {
+          await Au.signInWithEmailAndPassword(auth, email, code);
+          const a = await check(); if (a.company === '*' || a.company === ck) return a;
+          await Au.signOut(auth);
+        } catch (e) { if (e && (e.code === 'auth/too-many-requests' || e.code === 'auth/network-request-failed')) throw e; }
+      }
+      const err = new Error('code'); err.code = 'wb/wrong-code'; throw err;
+    },
+    async logout() { this.close(); S.adm = null; try { await Au.signOut(auth); } catch (e) {} },
+    close() { stops.forEach((f) => f()); stops = []; },
+    // alle gegevens van één bedrijf voor het dashboard
+    open(key) {
+      this.close(); S.adm = { key, acts: [], joins: [], users: {}, views: [], events: [], cfg: null, loaded: false, denied: false };
+      const col = (n) => F.collection(db, 'companies', key, n);
+      const mine = () => S.adm && S.adm.key === key;
+      const err = (e) => { console.error(e); if (mine()) { S.adm.denied = true; refresh(); } };
+      const set = (k, v) => { if (!mine()) return; S.adm[k] = v; S.adm.loaded = true; refresh(); };
+      stops.push(F.onSnapshot(F.query(col('activities'), F.orderBy('date', 'desc'), F.limit(1000)), (s) => set('acts', rows(s)), err));
+      stops.push(F.onSnapshot(col('joins'), (s) => set('joins', rows(s)), err));
+      stops.push(F.onSnapshot(col('users'), (s) => { const u = {}; s.docs.forEach((d) => { u[d.id] = d.data(); }); set('users', u); }, err));
+      stops.push(F.onSnapshot(col('views'), (s) => set('views', rows(s)), err));
+      stops.push(F.onSnapshot(F.query(col('events'), F.orderBy('at', 'desc'), F.limit(5000)), (s) => set('events', rows(s)), err));
+      stops.push(F.onSnapshot(F.doc(db, 'companies', key, 'config', 'main'), (d) => set('cfg', d.exists() ? d.data() : null), err));
+    },
+    async companies() { const s = await F.getDocs(F.collection(db, 'companies')); return s.docs.map((d) => ({ key: d.id, name: (d.data().name || d.id).trim() })).sort((a, b) => a.name.localeCompare(b.name, 'nl')); },
+    async config(c) { await F.setDoc(F.doc(db, 'companies', S.adm.key, 'config', 'main'), c, { merge: true }); },
+    raw: { db, F }, // voor het opruimen van testgegevens met de hoofdcode
+  };
+}
+let admStore = null;
+async function openAdmin(a) {
+  S.admin = a;
+  const key = a.company === '*' ? (S.admKey || S.ck) : a.company;
+  if (a.company === '*') { try { S.admCompanies = await admStore.companies(); } catch (e) { S.admCompanies = []; } }
+  const pick = key || (S.admCompanies && S.admCompanies[0] && S.admCompanies[0].key);
+  if (pick) { S.admKey = pick; admStore.open(pick); }
+  render();
 }
 
 // ---------- afgeleide cijfers ----------
@@ -552,25 +611,31 @@ function vSamen() {
     <h2>Instellingen</h2>
     ${canNotif ? '<button class="secondary" type="button" data-act="notifperm">Meldingen ook tonen als de app op de achtergrond staat</button>' : ''}
     ${S.mode === 'local' ? '<button class="secondary" type="button" data-act="simulate">Simuleer: een collega plant een wandeling</button>' : ''}
-    <button class="secondary" type="button" data-tab="dash">Managementdashboard bekijken</button>
+    <button class="secondary" type="button" data-tab="dash">Management</button>
     ${S.mode === 'local' ? '<button class="danger" type="button" data-act="reset" style="align-self:flex-start">Demo opnieuw beginnen</button>' : ''}`;
 }
 
 // ---------- werkgeversdashboard ----------
+// Bron van het dashboard: in de demo de eigen gegevens, online alleen wat de beheerder mag lezen.
+const dashSrc = () => (S.mode === 'local' ? S : S.adm || { acts: [], joins: [], users: {}, views: [], events: [], cfg: null });
 function dashData() {
+  const src = dashSrc();
+  const actById = (id) => src.acts.find((a) => a.id === id);
+  const realName = (u) => (src.users[u] && src.users[u].name) || 'Collega';
+  const stepsOf = (j) => stepsOfAct(j, actById(j.act));
   const now = Date.now(); const d0 = new Date(); const monthStart = new Date(d0.getFullYear(), d0.getMonth(), 1).getTime();
   const since = S.period === 'all' ? 0 : S.period === 'month' ? monthStart : now - 7 * 864e5;
   const sinceDate = since ? ymd(new Date(since)) : '0000-00-00';
-  const acts = S.acts.filter((a) => a.date >= sinceDate);
+  const acts = src.acts.filter((a) => a.date >= sinceDate);
   const ids = new Set(acts.map((a) => a.id));
-  const joins = S.joins.filter((j) => ids.has(j.act));
+  const joins = src.joins.filter((j) => ids.has(j.act));
   const extraJoins = joins.filter((j) => j.uid !== actById(j.act).by); // op "Doe mee" getikt (organisator niet meegeteld)
-  const views = S.views.filter((v) => ids.has(v.act) && v.uid !== actById(v.act).by);
-  const ev = S.events.filter((e) => (e.at || 0) >= since);
+  const views = src.views.filter((v) => ids.has(v.act) && v.uid !== actById(v.act).by);
+  const ev = src.events.filter((e) => (e.at || 0) >= since);
   const opens = ev.filter((e) => e.kind === 'open');
   const pastJoins = joins.filter((j) => isPast(actById(j.act)));
   const pastActs = acts.filter(isPast);
-  const users = Object.keys(S.users);
+  const users = Object.keys(src.users);
   const active = new Set([...opens.map((e) => e.uid), ...joins.map((j) => j.uid), ...acts.map((a) => a.by)]);
   const saw = new Set(views.map((v) => v.uid)); const tapped = new Set(extraJoins.map((j) => j.uid)); const planners = new Set(acts.map((a) => a.by));
   const groupSizes = pastActs.map((a) => joins.filter((j) => j.act === a.id).length).filter((n) => n > 0);
@@ -581,7 +646,7 @@ function dashData() {
     return { a, seen: v, joined: jn, total: joins.filter((x) => x.act === a.id).length, conv: pct(jn, v) };
   });
   const perUser = users.map((u) => ({
-    u, name: realName(u), company: S.users[u]?.company || '',
+    u, name: realName(u), company: src.users[u]?.company || '',
     opens: opens.filter((e) => e.uid === u).length, seen: views.filter((v) => v.uid === u).length,
     joined: extraJoins.filter((j) => j.uid === u).length, planned: acts.filter((a) => a.by === u).length,
     steps: pastJoins.filter((j) => j.uid === u).reduce((s, j) => s + stepsOf(j), 0),
@@ -593,7 +658,8 @@ function dashData() {
     avgGroup: groupSizes.length ? (groupSizes.reduce((s, n) => s + n, 0) / groupSizes.length) : 0,
     notifShown: ev.filter((e) => e.kind === 'notif_shown').length, notifJoin: ev.filter((e) => e.kind === 'notif_join').length,
     topTime, topType,
-    activeToday: new Set(S.events.filter((e) => e.kind === 'open' && ymd(new Date(e.at || 0)) === todayStr()).map((e) => e.uid)).size,
+    activeToday: new Set(src.events.filter((e) => e.kind === 'open' && ymd(new Date(e.at || 0)) === todayStr()).map((e) => e.uid)).size,
+    realName, cfg: src.cfg,
   };
 }
 function vDash() {
@@ -602,11 +668,15 @@ function vDash() {
   const fr = (label, n, of, note) => `<div class="frow"><span>${label}</span><b>${n} <em>${note ?? (of ? pct(n, of) + '%' : '')}</em></b><div class="ftrack"><i style="width:${of ? Math.max(2, pct(n, of)) : 0}%"></i></div></div>`;
   const total = D.users.length;
   const conv = pct(D.extraJoins.length, D.views.length);
-  const cfg = S.cfg || {};
+  const cfg = D.cfg || {}; const realName = D.realName;
+  const isMaster = S.admin && S.admin.company === '*';
+  const coName = S.mode === 'local' ? '' : ((S.admCompanies || []).find((c) => c.key === S.admKey) || {}).name || (S.admKey === S.ck ? (S.users[S.me] || {}).company : '') || '';
+  const picker = isMaster && (S.admCompanies || []).length ? `<div class="field"><span>Bedrijf (hoofdcode: je ziet alle bedrijven)</span><div class="chips">${S.admCompanies.map((c) => `<button type="button" class="chip" data-admco="${esc(c.key)}" aria-pressed="${c.key === S.admKey}">${esc(c.name)}</button>`).join('')}</div></div>` : '';
+  const admBanner = S.adm && S.adm.denied ? '<div class="banner"><b>Geen toegang tot deze gegevens</b>Dit beheerdersaccount mag de gegevens van dit bedrijf niet lezen.</div>' : '';
   return `<button class="back" type="button" data-tab="samen">‹ Terug</button>
-    <div><div class="eyebrow">Voor het management</div><h1>Managementdashboard</h1>
+    <div><div class="eyebrow">Voor het management${coName ? ' · ' + esc(coName) : ''}</div><h1>Managementdashboard</h1>
       <p class="muted">Hier ziet het management of de app gebruikt wordt en hoeveel mensen samen bewegen. Voor jullie test zijn dit meteen de inzichten.</p></div>
-    ${banner()}
+    ${picker}${admBanner}${banner()}
     <div class="seat"><div class="eyebrow" style="color:inherit;opacity:.8">Abonnement</div>
       <div><span style="font-size:22px;font-weight:800">Pakket ${pack} medewerkers</span></div>
       <div class="bar"><i style="width:${Math.min(100, pct(seats, pack))}%"></i></div>
@@ -647,7 +717,16 @@ function vDash() {
       <div class="field" style="margin-top:10px"><span>Samen-momenten deze maand</span><input class="text" id="cgoal" type="number" min="1" max="10000" value="${Math.max(1, Number(cfg.goal) || 40)}"></div>
       <div class="field"><span>Stappendoel deze maand (vult de longen)</span><input class="text" id="cstepgoal" type="number" min="1000" max="10000000" step="1000" value="${Math.max(1000, Number(cfg.stepGoal) || 50000)}"></div>
       <div class="field"><span>Beloning</span><input class="text" id="creward" type="text" maxlength="100" value="${esc(cfg.reward || '')}" placeholder="bv. ontbijt voor iedereen"></div>
-      <button class="pill join" type="button" data-act="cfg" style="align-self:flex-start">Opslaan</button></details>`;
+      <button class="pill join" type="button" data-act="cfg" style="align-self:flex-start">Opslaan</button></details>
+    ${S.mode === 'shared' ? '<button class="danger" type="button" data-act="admlogout" style="align-self:flex-start">Afmelden als beheerder</button>' : ''}`;
+}
+function vAdminLogin() {
+  return `<button class="back" type="button" data-tab="samen">‹ Terug</button>
+    <div><div class="eyebrow">Alleen voor beheerders</div><h1>Management</h1>
+      <p class="muted">Geef je beheerderscode in om het managementdashboard van je bedrijf te openen.</p></div>
+    <label class="field"><span>Beheerderscode</span><input class="text" id="admcode" type="password" autocomplete="current-password" autocapitalize="off" spellcheck="false" maxlength="80"></label>
+    <button class="primary" type="button" data-act="admlogin">Open dashboard</button>
+    <p class="note">Geen code? Het dashboard is alleen voor het management. Je collega's zien hier niets van.</p>`;
 }
 function csvDownload(name, rows) {
   const txt = '﻿' + rows.map((r) => r.map((c) => { const s = String(c ?? ''); return /[";\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }).join(';')).join('\r\n');
@@ -672,7 +751,7 @@ function render(preserve = false) {
   if (needsWelcome()) html = vWelcome();
   else if (S.draft) html = vCreate();
   else if (S.detail) html = vDetail();
-  else html = S.tab === 'samen' ? vSamen() : S.tab === 'dash' ? vDash() : vAgenda();
+  else html = S.tab === 'samen' ? vSamen() : S.tab === 'dash' ? (S.mode === 'local' || S.admin ? vDash() : vAdminLogin()) : vAgenda();
   main.innerHTML = html;
   for (const id in keep) { const el = document.getElementById(id); if (el) el.value = keep[id]; }
   openD.forEach((id) => { const d = document.getElementById(id); if (d) d.open = true; });
@@ -686,7 +765,7 @@ function render(preserve = false) {
   // "gezien" bijhouden: welke activiteiten van anderen verschenen op dit scherm
   if (!bare && document.visibilityState === 'visible') {
     const ids = key.startsWith('detail:') ? [S.detail] : key === 'tab:agenda' ? [...main.querySelectorAll('[data-open]')].map((e) => e.dataset.open) : [];
-    for (const id of ids) { const a = actById(id); if (a && a.by !== S.me && !S.seen.has(id)) { S.seen.add(id); store.view(id); } }
+    for (const id of ids) { const a = actById(id); if (a && a.by !== S.me && !S.seen.has(id)) { S.seen.add(id); ls.set('wb-seen', JSON.stringify([...S.seen].slice(-300))); store.view(id); } }
   }
 }
 const refresh = () => render(true);
@@ -704,6 +783,7 @@ async function handle(el) {
     showPop(); return;
   }
   if (el.dataset.comp) { S.signup = { ...(S.signup || {}), company: el.dataset.comp }; const c = $('#wcomp'); if (c) c.value = el.dataset.comp; const sg = $('#sugg'); if (sg) sg.innerHTML = suggHtml(); return; }
+  if (el.dataset.admco) { S.admKey = el.dataset.admco; admStore.open(S.admKey); render(); return; }
   if (el.dataset.filter) { S.filter = el.dataset.filter; render(); return; }
   if (el.dataset.period) { S.period = el.dataset.period; render(); return; }
   if (el.dataset.tab) { S.tab = el.dataset.tab; S.detail = null; S.draft = null; history.replaceState(null, '', S.tab === 'dash' ? '#dashboard' : location.pathname + location.search); render(); window.scrollTo(0, 0); return; }
@@ -753,10 +833,24 @@ async function handle(el) {
     const goal = Math.max(1, Math.min(10000, Math.round(Number($('#cgoal').value) || 40)));
     const stepGoal = Math.max(1000, Math.min(10000000, Math.round(Number($('#cstepgoal').value) || 50000)));
     const reward = $('#creward').value.trim().slice(0, 100);
-    try { await store.config({ goal, stepGoal, reward }); toast('Doelen opgeslagen.'); } catch (e) {} return;
+    if (S.mode === 'local') { try { await store.config({ goal, stepGoal, reward }); toast('Doelen opgeslagen.'); } catch (e) {} return; }
+    if (!S.admin || !S.adm) { toast('Alleen een beheerder kan dit aanpassen.'); return; }
+    try { await admStore.config({ goal, stepGoal, reward }); toast('Doelen opgeslagen.'); } catch (e) { console.error(e); toast('Opslaan lukte niet. Probeer opnieuw.'); } return;
   }
+  if (act === 'admlogin') {
+    const code = ($('#admcode') || {}).value || '';
+    if (!code) { toast('Vul je beheerderscode in.'); return; }
+    el.disabled = true; el.textContent = 'Even geduld…';
+    try { const a = await admStore.login(code, S.ck); toast('Welkom in het managementdashboard.'); await openAdmin(a); }
+    catch (e) {
+      toast(e && e.code === 'auth/too-many-requests' ? 'Te veel pogingen. Probeer het over een paar minuten opnieuw.' : e && e.code === 'auth/network-request-failed' ? 'Geen verbinding. Probeer opnieuw.' : 'Deze code is niet juist.');
+      el.disabled = false; el.textContent = 'Open dashboard'; const i = $('#admcode'); if (i) { i.value = ''; i.focus(); }
+    }
+    return;
+  }
+  if (act === 'admlogout') { await admStore.logout(); S.admin = null; S.tab = 'samen'; history.replaceState(null, '', location.pathname + location.search); render(); toast('Je bent afgemeld als beheerder.'); return; }
   if (act === 'csv-users') { const D = dashData(); csvDownload('wandelbuddy-testers.csv', [['Naam', 'Bedrijf', 'Keer geopend', 'Activiteiten gezien', 'Doe mee getikt', 'Zelf gepland', 'Stappen', 'Beweegminuten'], ...D.perUser.map((r) => [r.name, r.company, r.opens, r.seen, r.joined, r.planned, r.steps, r.minutes])]); return; }
-  if (act === 'csv-acts') { const D = dashData(); csvDownload('wandelbuddy-activiteiten.csv', [['Datum', 'Uur', 'Activiteit', 'Duur (min)', 'Vertrek', 'Georganiseerd door', 'Gezien door', 'Doe mee getikt', 'Totaal deelnemers', 'Conversie %'], ...D.perAct.map((r) => [r.a.date, r.a.time, TYPES[r.a.type]?.label || r.a.type, r.a.dur, r.a.place, realName(r.a.by), r.seen, r.joined, r.total, r.seen ? r.conv : ''])]); return; }
+  if (act === 'csv-acts') { const D = dashData(); csvDownload('wandelbuddy-activiteiten.csv', [['Datum', 'Uur', 'Activiteit', 'Duur (min)', 'Vertrek', 'Georganiseerd door', 'Gezien door', 'Doe mee getikt', 'Totaal deelnemers', 'Conversie %'], ...D.perAct.map((r) => [r.a.date, r.a.time, TYPES[r.a.type]?.label || r.a.type, r.a.dur, r.a.place, D.realName(r.a.by), r.seen, r.joined, r.total, r.seen ? r.conv : ''])]); return; }
   if (act === 'notifperm') { try { const p = await Notification.requestPermission(); toast(p === 'granted' ? 'Meldingen staan aan op dit toestel.' : 'Meldingen niet toegestaan. In de app krijg je ze wel.'); } catch (e) { toast('Deze browser ondersteunt dat niet. In de app krijg je ze wel.'); } render(); return; }
   if (act === 'simulate') { S.tab = 'agenda'; render(); store.simulate(); return; }
   if (act === 'reset') { await store.reset(); S.detail = null; S.notifQ = []; S.reminded = new Set(); ls.set('wb-reminded', '[]'); showPop(); toast('Demo opnieuw gestart.'); return; }
@@ -767,10 +861,11 @@ function readDraftInputs() {
   const n = $('#cnote'); if (n) S.draft.note = n.value;
   const t = $('#ctime'); if (t && t.value) S.draft.time = t.value;
 }
-document.addEventListener('click', (e) => { const el = e.target.closest('[data-tab],[data-join],[data-open],[data-set],[data-act],[data-pop],[data-period],[data-filter],[data-comp]'); if (el) { e.stopPropagation(); handle(el); } });
+document.addEventListener('click', (e) => { const el = e.target.closest('[data-tab],[data-join],[data-open],[data-set],[data-act],[data-pop],[data-period],[data-filter],[data-comp],[data-admco]'); if (el) { e.stopPropagation(); handle(el); } });
 document.addEventListener('keydown', (e) => {
   if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[data-open]')) { e.preventDefault(); handle(e.target); }
   if (e.key === 'Enter' && ['wfirst', 'wlast', 'wcomp'].includes(e.target.id)) { e.preventDefault(); handle($('[data-act="welcome"]')); }
+  if (e.key === 'Enter' && e.target.id === 'admcode') { e.preventDefault(); handle($('[data-act="admlogin"]')); }
 });
 // aanmeldvelden bijhouden terwijl je typt (en de bedrijfsvoorstellen bijwerken)
 document.addEventListener('input', (e) => {
@@ -812,11 +907,15 @@ async function boot() {
   const cfg = S.cfgFile;
   if (cfg) {
     try {
-      const { F, db, Au, auth } = await loadFirebase(cfg);
+      const { A, F, db, Au, auth } = await loadFirebase(cfg);
       S.authUid = await signInAnon(Au, auth);
       S.ck = ls.get('wb-ck') || null; S.me = (S.ck && ls.get('wb-pid')) || null;
-      S.mode = 'shared'; store = sharedStore(F, db); store.start(); render();
+      S.mode = 'shared'; store = sharedStore(F, db); store.start();
+      admStore = adminStore(A, F, Au, cfg);
+      render();
       trackOpen();
+      // was dit toestel al aangemeld als beheerder? dan meteen terug in het dashboard
+      admStore.restore().then((a) => { if (a && (a.company === '*' || a.company === S.ck)) openAdmin(a); });
       return;
     } catch (e) {
       console.error(e);

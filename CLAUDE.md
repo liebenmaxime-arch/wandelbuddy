@@ -30,7 +30,16 @@ Webapp waarin collega's een middagwandeling of andere activiteit plannen. Andere
   - `companies/{companyKey}/{activities|joins|users|views|events|config}` (alleen voor leden van dat bedrijf)
   - De oude mappen bovenaan (`activities`, `users`, ...) horen bij de oude link en blijven ongewijzigd.
 - Databaseregels staan in `firestore.rules`. Na een wijziging moet Maxime ze zelf plakken in Firebase → Firestore → Rules → Publish.
-- Nog op te ruimen (kan pas met beheerdersrechten): bedrijven "Testbedrijf Claude" en "Testbedrijf Claude B" in `companies` (+ hun `auth`-kaartjes, en 1 gebruiker + events in B), en 4 testgebruikers "Test …" met events/views in de oude mappen bovenaan.
+- Regels in het kort: leden lezen activiteiten/joins/users/config van hun bedrijf; schrijven alleen hun eigen profiel (alleen photo/lastSeen/authUids mogen veranderen), eigen activiteiten en eigen joins; views/events alleen schrijven. Beheerders van het bedrijf lezen alles van dat bedrijf en passen config aan. Alleen de hoofdcode mag verwijderen.
+
+## Beheerders (managementdashboard)
+- Knop "Management" in het tabblad Samen → beheerderscode. De code is het wachtwoord van een Firebase Auth e-mail/wachtwoord-account. De app gebruikt een aparte Firebase-app "beheer" voor die sessie.
+- E-mailadressen (verborgen in de app): `beheer-<companyKey>@wandelbuddy-9c08c.firebaseapp.com` per bedrijf, `team@wandelbuddy-9c08c.firebaseapp.com` voor de hoofdcode.
+- Of een account beheerder is, staat in `admins/{uid}` = { company: "<companyKey>" } of { company: "*" } (hoofdcode). Alleen aan te passen in de Firebase-console.
+- Bestaande accounts: `team@…` (company "*") en `beheer-testbedrijfclaude@…` (company "testbedrijfclaude", alleen voor tests).
+- Nieuw bedrijf (bv. UHasselt): Authentication → Add user `beheer-uhasselt@wandelbuddy-9c08c.firebaseapp.com` met een code die Maxime kiest, daarna in Firestore `admins/{die UID}` met `company` = `uhasselt`.
+- Codes nooit in de repository of in de chat zetten; Claude typt ze niet zelf in.
+- Testen met codes: Maxime typt de code zelf in het browservenster naast de chat. Opruimen van testgegevens gebeurt met de hoofdcode via de Firebase-app "beheer" (auth-kaartjes kunnen niet opgesomd worden, die blijven onzichtbaar achter).
 
 ## Regels
 - Alles GRATIS: geen betaalplannen, geen kredietkaart, geen App Store of Google Play. Geen Firebase Cloud Functions, geen Firebase Storage.

@@ -2,17 +2,33 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // ===== Hulpregels =====
+    function ingelogd() { return request.auth != null; }
+    // beheerders staan in admins/{uid} met company = "<bedrijf>" of "*" (hoofdcode, alle bedrijven)
+    function adminDoc() { return /databases/$(database)/documents/admins/$(request.auth.uid); }
+    function isBeheerder() { return ingelogd() && exists(adminDoc()); }
+    function isHoofd() { return isBeheerder() && get(adminDoc()).data.company == '*'; }
+    function beheerderVan(c) { return isBeheerder() && (get(adminDoc()).data.company == c || get(adminDoc()).data.company == '*'); }
+    // "dit toestel hoort bij dit bedrijf" + welk profiel erbij hoort
+    function kaartje(c) { return /databases/$(database)/documents/companies/$(c)/auth/$(request.auth.uid); }
+    function lidVan(c) { return ingelogd() && exists(kaartje(c)); }
+    function mijnId(c) { return get(kaartje(c)).data.get('pid', ''); }
+
     // ===== Oude versie (oude link met de testdata): ongewijzigd =====
+    // Enige toevoeging: met de hoofdcode mag je oude testgegevens verwijderen.
     match /{col}/{id} {
       allow read: if col in ['activities', 'joins', 'users', 'views', 'events', 'config'];
       allow create, update: if col in ['activities', 'joins', 'users', 'views', 'events', 'config'];
-      allow delete: if col in ['activities', 'joins'];
+      allow delete: if col in ['activities', 'joins'] || (isHoofd() && col in ['users', 'views', 'events', 'config']);
+    }
+
+    // ===== Beheerderslijst: alleen aan te passen in de Firebase-console =====
+    match /admins/{uid} {
+      allow read: if ingelogd() && request.auth.uid == uid;
+      allow write: if false;
     }
 
     // ===== Nieuwe versie: elk bedrijf in een eigen map =====
-    function ingelogd() { return request.auth != null; }
-    function lidVan(c) { return ingelogd() && exists(/databases/$(database)/documents/companies/$(c)/auth/$(request.auth.uid)); }
-
     match /companies/{c} {
       // de lijst met bedrijfsnamen (voor de voorstellen bij het aanmelden)
       allow read: if ingelogd();
@@ -20,17 +36,60 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly(['name', 'createdAt'])
         && request.resource.data.name is string
         && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 60;
-      allow update, delete: if false;
+      allow update: if false;
+      allow delete: if isHoofd();
 
-      // "dit toestel hoort bij dit bedrijf": elk toestel mag alleen zijn eigen kaartje maken
+      // elk toestel mag alleen zijn eigen kaartje maken
       match /auth/{uid} {
         allow read, create, update: if ingelogd() && request.auth.uid == uid;
-        allow delete: if false;
+        allow delete: if isHoofd();
       }
 
-      // alle gegevens van het bedrijf: alleen voor wie bij dat bedrijf hoort
-      match /{sub}/{id} {
-        allow read, write: if lidVan(c) && sub in ['activities', 'joins', 'users', 'views', 'events', 'config'];
+      // profielen: iedereen van het bedrijf mag ze zien, alleen jezelf mag je eigen profiel schrijven,
+      // en naam en bedrijf liggen vast (alleen foto en "laatst gezien" mogen veranderen)
+      match /users/{id} {
+        allow read: if lidVan(c) || beheerderVan(c);
+        allow create: if lidVan(c) && mijnId(c) == id;
+        allow update: if lidVan(c) && mijnId(c) == id
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['photo', 'lastSeen', 'authUids'])
+          && (!('photo' in request.resource.data) || (request.resource.data.photo is string && request.resource.data.photo.size() < 150000));
+        allow delete: if isHoofd();
+      }
+
+      // activiteiten: alleen je eigen activiteiten plaatsen of verwijderen
+      match /activities/{id} {
+        allow read: if lidVan(c) || beheerderVan(c);
+        allow create: if lidVan(c) && request.resource.data.by == mijnId(c);
+        allow update: if false;
+        allow delete: if (lidVan(c) && resource.data.by == mijnId(c)) || isHoofd();
+      }
+
+      // meedoen: alleen voor jezelf; de organisator mag deelnames van zijn activiteit opruimen
+      match /joins/{id} {
+        allow read: if lidVan(c) || beheerderVan(c);
+        allow create, update: if lidVan(c) && request.resource.data.uid == mijnId(c);
+        allow delete: if (lidVan(c) && (resource.data.uid == mijnId(c)
+            || get(/databases/$(database)/documents/companies/$(c)/activities/$(resource.data.act)).data.by == mijnId(c)))
+          || isHoofd();
+      }
+
+      // dashboardgegevens: iedereen schrijft alleen zijn eigen regels, alleen beheerders van dit bedrijf lezen ze
+      match /views/{id} {
+        allow read: if beheerderVan(c);
+        allow create, update: if lidVan(c) && request.resource.data.uid == mijnId(c);
+        allow delete: if isHoofd();
+      }
+      match /events/{id} {
+        allow read: if beheerderVan(c);
+        allow create: if lidVan(c) && request.resource.data.uid == mijnId(c);
+        allow update: if false;
+        allow delete: if isHoofd();
+      }
+
+      // doelen en beloning: iedereen van het bedrijf ziet ze, alleen een beheerder past ze aan
+      match /config/{id} {
+        allow read: if lidVan(c) || beheerderVan(c);
+        allow write: if beheerderVan(c);
       }
     }
   }
