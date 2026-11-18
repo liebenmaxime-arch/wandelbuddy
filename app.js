@@ -3,6 +3,7 @@
 import { firebaseConfig } from './firebase-config.js';
 import { pushConfig } from './push-config.js';
 import { SPORTS, CAT_ICONS, CAT_SPM } from './sports.js';
+import { REWARDS, findReward, rewardSvg } from './rewards.js';
 const FB_VER = '10.12.2';
 
 // ---------- constants ----------
@@ -166,7 +167,7 @@ function localStore() {
   let data; try { data = JSON.parse(ls.get(KEY) || 'null'); } catch (e) { data = null; }
   if (!data || !data.users) data = seed();
   const persist = () => ls.set(KEY, JSON.stringify(data));
-  const push = () => { S.users = { ...data.users }; S.acts = data.acts.slice(); S.joins = data.joins.slice(); S.views = data.views.slice(); S.events = data.events.slice(); S.cfg = data.cfg; S.loadedActs = true; persist(); refresh(); };
+  const push = () => { S.users = { ...data.users }; S.acts = data.acts.slice(); S.joins = data.joins.slice(); S.views = data.views.slice(); S.events = data.events.slice(); S.cfg = data.cfg; S.loadedActs = true; S.loadedJoins = true; persist(); refresh(); };
   return {
     start() { S.me = 'me'; push(); },
     async profile(p) { data.users.me = { ...data.users.me, ...p }; push(); },
@@ -387,8 +388,8 @@ function earnedBadges(uid) {
 }
 // nieuwe badge? één keer feliciteren (op dit toestel bijgehouden; de eerste keer op een toestel stil)
 function checkNewBadges() {
-  if (S.mode !== 'shared' || !S.me || !S.ck || !S.loadedActs || !S.loadedJoins) return;
-  const key = `wb-badges-${S.ck}-${S.me}`; const earned = [...earnedBadges(S.me)];
+  if (S.mode === 'loading' || !S.me || !S.loadedActs || !S.loadedJoins) return;
+  const key = `wb-badges-${S.ck || 'demo'}-${S.me}`; const earned = [...earnedBadges(S.me)];
   let seen = null; try { seen = JSON.parse(ls.get(key) || 'null'); } catch (e) {}
   if (!Array.isArray(seen)) { ls.set(key, JSON.stringify(earned)); return; }
   const fresh = earned.filter((id) => !seen.includes(id)); if (!fresh.length) return;
@@ -761,6 +762,36 @@ function vLungs(tg, m) {
       <div class="mine-bar" aria-hidden="true"><i style="width:${Math.min(100, myPct)}%"></i></div>
     </div></div>`;
 }
+// ---------- beloning die zich vult (in plaats van de longen, als er een tekening bij de beloning past) ----------
+const stepGoalOf = () => Math.max(1000, Number(S.cfg?.stepGoal) || 50000);
+function vReward(tg, m, art, reward) {
+  const goal = stepGoalOf(); const p = Math.min(100, pct(tg.steps, goal)); const left = Math.max(0, goal - tg.steps);
+  return `<div class="reward${p >= 100 ? ' done' : ''}" role="img" aria-label="${esc(art.name)}: ${p}% gevuld, ${fmtN(tg.steps)} van ${fmtN(goal)} stappen">
+    <div class="rpic">${rewardSvg(art, p)}</div>
+    <div class="rmeta"><div class="eyebrow">Beloning van het team</div>
+      <b class="rname">${esc(reward)}</b>
+      ${p >= 100 ? `<p class="rdone">🎉 Doel gehaald! ${esc(art.done)}</p>` : `<p class="lnext">Nog ${fmtN(left)} stappen tot de beloning.</p>`}
+      <div class="rbar" aria-hidden="true"><i style="width:${p}%"></i></div>
+      <p class="small muted">${p}% · ${fmtN(tg.steps)} / ${fmtN(goal)} stappen · ${AUTO_NOTE.toLowerCase()}</p>
+      <p class="small muted">Jouw bijdrage: ${fmtN(m.stepsMonth)} stappen</p>
+    </div></div>`;
+}
+// voorbeeld voor de beheerder in het dashboard
+function rewardPreview(text) {
+  const art = findReward(text);
+  if (art) return `<div class="rprev-in">${rewardSvg(art, 60)}<p class="small"><b>Tekening: ${esc(art.name)}</b><br><span class="muted">Zo ziet ze eruit bij 60% van het stappendoel. Bij 100%: "Doel gehaald! ${esc(art.done)}"</span></p></div>`;
+  if (String(text || '').trim()) return `<p class="small muted">Geen passende tekening gevonden, dus de longen blijven staan. Tekeningen bestaan voor: ${REWARDS.map((r) => r.name.toLowerCase()).join(', ')}.</p>`;
+  return '<p class="small muted">Typ een beloning om te zien welke tekening erbij hoort.</p>';
+}
+// stappendoel gehaald? één keer per maand (per toestel) een feestelijke melding
+function checkGoal() {
+  if (S.mode === 'loading' || !S.me || !S.loadedActs || !S.loadedJoins || !S.cfg) return;
+  const tg = together(); if (tg.steps < stepGoalOf()) return;
+  const key = `wb-goal-${S.ck || 'demo'}-${monthKey(todayStr())}`; if (ls.get(key)) return; ls.set(key, '1');
+  const art = findReward(S.cfg.reward);
+  celebrate(art ? rewardSvg(art, 100) : BADGES.find((b) => b.id === 'steps50').icon, `Doel gehaald! ${art ? art.done : 'Het stappendoel van het team is bereikt.'}`); chime();
+}
+
 function vSamen() {
   const m = mine(); const tg = together();
   const goal = Math.max(1, Number(S.cfg?.goal) || 40); const reward = S.cfg?.reward || 'Stel een beloning in via het managementdashboard';
@@ -775,7 +806,7 @@ function vSamen() {
       <div class="bar" role="progressbar" aria-valuenow="${tg.moments}" aria-valuemin="0" aria-valuemax="${goal}"><i style="width:${p}%"></i></div>
       <p><b>Beloning:</b> ${esc(reward)}</p>
       <p class="small" style="opacity:.85">${tg.people} collega's bewogen deze maand samen en zetten ${fmtN(tg.steps)} stappen.</p></div>
-    ${vLungs(tg, m)}
+    ${findReward(S.cfg?.reward) ? vReward(tg, m, findReward(S.cfg.reward), S.cfg.reward) : vLungs(tg, m)}
     <h2>Jij deze maand</h2><p class="note" style="margin-top:-8px">${AUTO_NOTE}.</p>
     <div class="stats">
       <div class="stat"><b>${m.monthCount}</b><small>keer meegedaan</small></div>
@@ -899,7 +930,8 @@ function vDash() {
     <details id="dcfg" class="box"><summary style="cursor:pointer;font-weight:800">Doelen en beloning aanpassen</summary>
       <div class="field" style="margin-top:10px"><span>Samen-momenten deze maand</span><input class="text" id="cgoal" type="number" min="1" max="10000" value="${Math.max(1, Number(cfg.goal) || 40)}"></div>
       <div class="field"><span>Stappendoel deze maand (vult de longen)</span><input class="text" id="cstepgoal" type="number" min="1000" max="10000000" step="1000" value="${Math.max(1000, Number(cfg.stepGoal) || 50000)}"></div>
-      <div class="field"><span>Beloning</span><input class="text" id="creward" type="text" maxlength="100" value="${esc(cfg.reward || '')}" placeholder="bv. ontbijt voor iedereen"></div>
+      <div class="field"><span>Beloning</span><input class="text" id="creward" type="text" maxlength="100" value="${esc(cfg.reward || '')}" placeholder="bv. smoothies voor iedereen"></div>
+      <div class="rprev" id="rprev">${rewardPreview($('#creward') ? $('#creward').value : cfg.reward)}</div>
       <button class="pill join" type="button" data-act="cfg" style="align-self:flex-start">Opslaan</button></details>
     ${S.mode === 'shared' ? '<button class="danger" type="button" data-act="admlogout" style="align-self:flex-start">Afmelden als beheerder</button>' : ''}`;
 }
@@ -940,7 +972,7 @@ function render(preserve = false) {
   openD.forEach((id) => { const d = document.getElementById(id); if (d) d.open = true; });
   if (focusId) { const el = document.getElementById(focusId); if (el) { el.focus({ preventScroll: true }); try { if (selS != null) el.setSelectionRange(selS, selE); } catch (e) {} } }
   lastKey = key;
-  checkNewBadges();
+  checkNewBadges(); checkGoal();
   const bare = needsWelcome();
   $('.nav').hidden = bare;
   document.querySelectorAll('.tab').forEach((b) => b.setAttribute('aria-current', !S.draft && !S.detail && b.dataset.tab === (S.tab === 'dash' ? 'samen' : S.tab) ? 'page' : 'false'));
@@ -1142,6 +1174,7 @@ document.addEventListener('keydown', (e) => {
 document.addEventListener('click', (e) => { if (e.target.id === 'sheet') closeSheet(); });
 // aanmeldvelden bijhouden terwijl je typt (en de bedrijfsvoorstellen bijwerken)
 document.addEventListener('input', (e) => {
+  if (e.target.id === 'creward') { const p = $('#rprev'); if (p) p.innerHTML = rewardPreview(e.target.value); return; }
   if (e.target.id === 'sportq' && S.sheet) { S.sheet.q = e.target.value; const l = $('#sportlist'); if (l) { l.innerHTML = sportListHtml(S.sheet.q); l.scrollTop = 0; } return; }
   if (draftInput(e.target.id, e.target.value)) return;
   const k = { wfirst: 'first', wlast: 'last', wcomp: 'company' }[e.target.id]; if (!k) return;

@@ -38,6 +38,11 @@ Webapp waarin collega's een middagwandeling of andere activiteit plannen. Andere
 - Databaseregels staan in `firestore.rules`. Na een wijziging moet Maxime ze zelf plakken in Firebase → Firestore → Rules → Publish.
 - Regels in het kort: leden lezen activiteiten/joins/users/config van hun bedrijf; schrijven alleen hun eigen profiel (alleen photo/lastSeen/authUids mogen veranderen), eigen activiteiten en eigen joins; views/events alleen schrijven. Beheerders van het bedrijf lezen alles van dat bedrijf en passen config aan. Alleen de hoofdcode mag verwijderen.
 
+## Beloningstekening (deel J)
+- `rewards.js`: 12 eigen SVG-tekeningen (smoothie, pizza, ontbijt, koffie, ijsje, taart, frietjes, teamuitstap, broodjes, donuts, wafels, drankje) met trefwoorden (`findReward`, eerste trefwoord in de tekst wint). `rewardSvg(r, p)` tekent ze p% gevuld.
+- In Samen vervangt `vReward` de longen als de beloning (`config.reward`) een tekening heeft; anders blijven de longen (`vLungs`). Doel gehaald → feestelijke tekst in de kaart + één keer per maand per toestel `celebrate()` (`checkGoal`, localStorage `wb-goal-<bedrijf>-<maand>`).
+- Dashboard: live voorbeeld onder het beloningsvak (`rewardPreview`).
+
 ## Badges (deel I)
 - 16 badges in `BADGES` (app.js), elk met eigen SVG-icoon. Berekend door `statsFor(uid)` / `earnedBadges(uid)` uit activiteiten en deelnames (geen opslag in de database).
 - Felicitatie één keer per nieuwe badge: bijgehouden in localStorage `wb-badges-<bedrijf>-<profiel>`; eerste keer op een toestel stil. Getoond met `celebrate()` bovenaan (los van `toast()`).
