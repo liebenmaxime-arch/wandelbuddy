@@ -359,6 +359,29 @@ document.addEventListener('visibilitychange', () => {
 });
 function trackOpen() { if (!S.me) return; S.lastOpen = Date.now(); store.track('open'); store.touch(); }
 
+// ---------- web-app op het beginscherm ----------
+const isStandalone = () => (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isAndroid = () => /Android/i.test(navigator.userAgent);
+let installEvt = null; // Android/Chrome: hiermee kan de app zelf de installeervraag tonen
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; if (S.mode !== 'loading') refresh(); });
+window.addEventListener('appinstalled', () => { installEvt = null; ls.set('wb-install-hidden', '1'); toast('Wandelbuddy staat nu op je beginscherm.'); if (S.mode !== 'loading') refresh(); });
+if ('serviceWorker' in navigator && /^https?:/.test(location.protocol)) navigator.serviceWorker.register('sw.js').catch((e) => console.warn('service worker', e));
+const SHARE_ICON = '<svg class="inl" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M8 7l4-4 4 4"/><path d="M6 11v9h12v-9"/></svg>';
+function installHtml(withLater) {
+  if (isStandalone()) return '';
+  const os = S.installOs || (isAndroid() ? 'android' : 'ios');
+  const ios = `<ol class="steps"><li>Open deze pagina in <b>Safari</b>.</li><li>Tik onderaan op de knop <b>Deel</b> ${SHARE_ICON} (vierkantje met een pijl omhoog).</li><li>Scrol naar beneden en tik op <b>Zet op beginscherm</b>.</li><li>Tik rechtsboven op <b>Voeg toe</b>.</li></ol>`;
+  const android = (installEvt ? '<button class="primary" type="button" data-act="install">Installeer Wandelbuddy</button><p class="small muted">Lukt dat niet? Doe het dan zo:</p>' : '')
+    + '<ol class="steps"><li>Open deze pagina in <b>Chrome</b>.</li><li>Tik rechtsboven op de drie puntjes <b>⋮</b>.</li><li>Tik op <b>App installeren</b> of <b>Toevoegen aan startscherm</b>.</li><li>Bevestig met <b>Installeren</b>.</li></ol>';
+  return `<div class="box install">
+    <div class="row" style="justify-content:space-between;flex-wrap:nowrap"><b>Zet Wandelbuddy op je beginscherm</b>${withLater ? '<button class="linkbtn" type="button" data-act="install-hide">Later</button>' : ''}</div>
+    <p class="small muted">Dan open je de app met één tik, zonder adresbalk, net als een gewone app.</p>
+    <div class="chips" role="group" aria-label="Toestel"><button type="button" class="chip" data-installos="ios" aria-pressed="${os === 'ios'}">iPhone</button><button type="button" class="chip" data-installos="android" aria-pressed="${os === 'android'}">Android</button></div>
+    ${os === 'ios' ? ios : android}
+  </div>`;
+}
+
 // ---------- profielfoto ----------
 // Alleen een kleine JPEG als data-URL wordt getoond (andere tekst in de database wordt genegeerd).
 const photoOf = (u, src) => { const p = ((src || S.users)[u] || {}).photo; return typeof p === 'string' && p.length < 150000 && /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(p) ? p : null; };
@@ -484,6 +507,7 @@ function vAgenda() {
   html += banner();
   const loading = S.mode === 'shared' && !S.loadedActs && !S.offline;
   if (loading) html += '<p class="loading">Activiteiten laden…</p>';
+  if (!loading && !ls.get('wb-install-hidden')) html += installHtml(true);
   if (all.length && !loading) html += `<div class="chips" role="group" aria-label="Filter"><button type="button" class="chip" data-filter="all" aria-pressed="${S.filter !== 'mine'}">Alles · ${all.length}</button><button type="button" class="chip" data-filter="mine" aria-pressed="${S.filter === 'mine'}">Mijn activiteiten · ${all.filter((a) => iJoined(a.id)).length}</button></div>`;
   if (!days.length && !loading && S.filter === 'mine' && all.length) {
     html += `<div class="empty"><b>Nog geen activiteiten voor jou</b><p class="muted small">Bekijk alle activiteiten en tik op Doe mee bij iets dat je past.</p><button class="secondary" type="button" data-filter="all" style="width:auto;padding:10px 16px">Toon alles</button></div>`;
@@ -609,6 +633,7 @@ function vSamen() {
     <h2>Jouw badges</h2>
     <div class="badges">${BADGES.map((b) => `<div class="badge ${earned[b.id] ? 'on' : ''}"><div class="medal">${medal}</div><div><b>${b.name}</b><span>${earned[b.id] ? 'Behaald' : b.how}</span></div></div>`).join('')}</div>
     <h2>Instellingen</h2>
+    ${isStandalone() ? '' : `<details id="dinstall" class="box"><summary style="cursor:pointer;font-weight:800">Zet de app op je beginscherm</summary><div style="margin-top:10px">${installHtml(false)}</div></details>`}
     ${canNotif ? '<button class="secondary" type="button" data-act="notifperm">Meldingen ook tonen als de app op de achtergrond staat</button>' : ''}
     ${S.mode === 'local' ? '<button class="secondary" type="button" data-act="simulate">Simuleer: een collega plant een wandeling</button>' : ''}
     <button class="secondary" type="button" data-tab="dash">Management</button>
@@ -783,6 +808,9 @@ async function handle(el) {
     showPop(); return;
   }
   if (el.dataset.comp) { S.signup = { ...(S.signup || {}), company: el.dataset.comp }; const c = $('#wcomp'); if (c) c.value = el.dataset.comp; const sg = $('#sugg'); if (sg) sg.innerHTML = suggHtml(); return; }
+  if (el.dataset.installos) { S.installOs = el.dataset.installos; render(); return; }
+  if (el.dataset.act === 'install-hide') { ls.set('wb-install-hidden', '1'); render(); toast('Je vindt de uitleg ook in het tabblad Samen.'); return; }
+  if (el.dataset.act === 'install') { if (installEvt) { const ev = installEvt; installEvt = null; try { await ev.prompt(); await ev.userChoice; } catch (e) {} render(); } return; }
   if (el.dataset.admco) { S.admKey = el.dataset.admco; admStore.open(S.admKey); render(); return; }
   if (el.dataset.filter) { S.filter = el.dataset.filter; render(); return; }
   if (el.dataset.period) { S.period = el.dataset.period; render(); return; }
@@ -861,7 +889,7 @@ function readDraftInputs() {
   const n = $('#cnote'); if (n) S.draft.note = n.value;
   const t = $('#ctime'); if (t && t.value) S.draft.time = t.value;
 }
-document.addEventListener('click', (e) => { const el = e.target.closest('[data-tab],[data-join],[data-open],[data-set],[data-act],[data-pop],[data-period],[data-filter],[data-comp],[data-admco]'); if (el) { e.stopPropagation(); handle(el); } });
+document.addEventListener('click', (e) => { const el = e.target.closest('[data-tab],[data-join],[data-open],[data-set],[data-act],[data-pop],[data-period],[data-filter],[data-comp],[data-admco],[data-installos]'); if (el) { e.stopPropagation(); handle(el); } });
 document.addEventListener('keydown', (e) => {
   if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[data-open]')) { e.preventDefault(); handle(e.target); }
   if (e.key === 'Enter' && ['wfirst', 'wlast', 'wcomp'].includes(e.target.id)) { e.preventDefault(); handle($('[data-act="welcome"]')); }

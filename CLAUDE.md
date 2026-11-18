@@ -17,6 +17,8 @@ Webapp waarin collega's een middagwandeling of andere activiteit plannen. Andere
 - `app.js`: alle logica (ES-module).
 - `firebase-config.js`: publieke Firebase web-config (`export const firebaseConfig`). Moet blijven werken.
 
+- `manifest.json`, `sw.js` (service worker) en `icons/` maken er een installeerbare web-app van. De service worker haalt eigen bestanden altijd eerst vers op (network-first) en cachet alleen de Firebase-bibliotheek; Firestore gaat er nooit door. Het browservenster in de Claude-app ondersteunt geen service workers: test die op de echte site of op een telefoon.
+
 ## Firebase
 - Firestore, gratis Spark-plan, project `wandelbuddy-9c08c`.
 - Collecties: `activities`, `joins`, `users`, `views`, `events`, `config`.
