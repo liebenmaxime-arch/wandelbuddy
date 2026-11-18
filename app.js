@@ -1,6 +1,7 @@
 // Wandelbuddy · app
 // De koppeling met Firebase staat in firebase-config.js.
 import { firebaseConfig } from './firebase-config.js';
+import { pushConfig } from './push-config.js';
 const FB_VER = '10.12.2';
 
 // ---------- constants ----------
@@ -225,6 +226,13 @@ function sharedStore(F, db) {
       for (const j of S.joins.filter((x) => x.act === act)) { try { await deleteDoc(dref('joins', j.id)); } catch (e) {} }
       await wrap(deleteDoc(dref('activities', act)));
     },
+    // meldingsadres van dit toestel bewaren (de Cloudflare Worker leest het als robot-beheerder)
+    async savePush(j) {
+      if (!ck || !S.me || !j || !j.endpoint || !j.keys) return;
+      const h = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(j.endpoint)));
+      const id = 'p_' + Array.from(h.slice(0, 16), (b) => b.toString(16).padStart(2, '0')).join('');
+      await setDoc(dref('push', id), { endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth, pid: S.me, at: Date.now(), ios: isIOS() });
+    },
     async view(act) { if (!ck) return; try { await setDoc(dref('views', `${act}__${S.me}`), { act, uid: S.me, at: Date.now() }); } catch (e) {} },
     async track(kind, extra = {}) { if (!ck) return; try { await addDoc(col('events'), { kind, uid: S.me, at: Date.now(), ...extra }); } catch (e) {} },
   };
@@ -382,6 +390,37 @@ function installHtml(withLater) {
   </div>`;
 }
 
+// ---------- pushmeldingen (ook als de app dicht is) ----------
+// iPhone: alleen vanaf iOS 16.4 en alleen als de app op het beginscherm staat.
+const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+const pushPossible = () => S.mode === 'shared' && !!S.me && !!pushConfig.vapidPublicKey && pushSupported() && !(isIOS() && !isStandalone());
+const keyBytes = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (s.length % 4)) % 4)), (c) => c.charCodeAt(0));
+async function pushSubscribe(ask) {
+  if (!pushPossible()) return false;
+  if (ask) { if ((await Notification.requestPermission()) !== 'granted') return false; }
+  else if (Notification.permission !== 'granted') return false;
+  const reg = await navigator.serviceWorker.ready;
+  let sub = await reg.pushManager.getSubscription();
+  if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(pushConfig.vapidPublicKey) });
+  await store.savePush(sub.toJSON());
+  return true;
+}
+const PUSH_WHAT = 'Je krijgt een melding als een collega iets plant, en 10 minuten voor een activiteit waaraan je meedoet. Ook als de app dicht is.';
+function pushCard() {
+  return `<div class="box install">
+    <div class="row" style="justify-content:space-between;flex-wrap:nowrap"><b>Zet meldingen aan</b><button class="linkbtn" type="button" data-act="push-hide">Later</button></div>
+    <p class="small muted">${PUSH_WHAT}</p>
+    <button class="primary" type="button" data-act="pushon">Zet meldingen aan</button></div>`;
+}
+function pushSettingsHtml() {
+  if (S.mode !== 'shared' || !pushConfig.vapidPublicKey) return '';
+  if (isIOS() && !isStandalone()) return '<p class="note">Meldingen op je iPhone: zet Wandelbuddy eerst op je beginscherm (vanaf iOS 16.4), open de app van daaruit en zet ze dan hier aan.</p>';
+  if (!pushSupported()) return '<p class="note">Deze browser kan geen meldingen tonen als de app dicht is. In de app zelf krijg je ze wel.</p>';
+  if (Notification.permission === 'denied') return '<p class="note">Meldingen zijn geblokkeerd voor Wandelbuddy. Zet ze aan in de instellingen van je toestel.</p>';
+  if (S.pushOn) return '<div class="status ok">✓ Meldingen staan aan op dit toestel</div>';
+  return `<button class="secondary" type="button" data-act="pushon">Zet meldingen aan</button><p class="note" style="margin-top:-8px">${PUSH_WHAT}</p>`;
+}
+
 // ---------- profielfoto ----------
 // Alleen een kleine JPEG als data-URL wordt getoond (andere tekst in de database wordt genegeerd).
 const photoOf = (u, src) => { const p = ((src || S.users)[u] || {}).photo; return typeof p === 'string' && p.length < 150000 && /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(p) ? p : null; };
@@ -508,6 +547,7 @@ function vAgenda() {
   const loading = S.mode === 'shared' && !S.loadedActs && !S.offline;
   if (loading) html += '<p class="loading">Activiteiten laden…</p>';
   if (!loading && !ls.get('wb-install-hidden')) html += installHtml(true);
+  else if (!loading && pushPossible() && Notification.permission === 'default' && !S.pushOn && !ls.get('wb-push-hidden')) html += pushCard();
   if (all.length && !loading) html += `<div class="chips" role="group" aria-label="Filter"><button type="button" class="chip" data-filter="all" aria-pressed="${S.filter !== 'mine'}">Alles · ${all.length}</button><button type="button" class="chip" data-filter="mine" aria-pressed="${S.filter === 'mine'}">Mijn activiteiten · ${all.filter((a) => iJoined(a.id)).length}</button></div>`;
   if (!days.length && !loading && S.filter === 'mine' && all.length) {
     html += `<div class="empty"><b>Nog geen activiteiten voor jou</b><p class="muted small">Bekijk alle activiteiten en tik op Doe mee bij iets dat je past.</p><button class="secondary" type="button" data-filter="all" style="width:auto;padding:10px 16px">Toon alles</button></div>`;
@@ -519,7 +559,8 @@ function vAgenda() {
   return html;
 }
 function vDetail() {
-  const a = actById(S.detail); if (!a) { S.detail = null; return vAgenda(); }
+  const a = actById(S.detail);
+  if (!a) { if (S.mode === 'shared' && !S.loadedActs) return '<p class="loading">Activiteit laden…</p>'; S.detail = null; return vAgenda(); }
   const t = TYPES[a.type] || TYPES.wandelen; const g = goingOf(a.id); const joined = iJoined(a.id); const past = isPast(a); const isMine = a.by === S.me;
   const max = a.max || t.max; const full = max && g.length >= max && !joined;
   const ppl = g.map((j) => `<div class="person"><div class="av" style="background:${colorFor(j.uid)}">${face(j.uid, nameOf(j.uid))}</div><div><b>${esc(nameOf(j.uid))}</b><small>${j.uid === a.by ? 'organiseert' : 'doet mee'}${past && stepsOf(j) ? ' · ' + fmtN(stepsOf(j)) + ' stappen' : ''}</small></div></div>`).join('');
@@ -609,7 +650,6 @@ function vSamen() {
   const earned = { first: m.done.length >= 1, lead: m.led >= 1, connect: m.mates.size >= 5, habit: m.weeks >= 3, mix: m.types >= 2, steps: m.stepsAll >= 10000 };
   const medal = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="14" r="6"/><path d="M8.5 3l3.5 5 3.5-5M12 11.5l1 2 2 .3-1.5 1.4.4 2-1.9-1-1.9 1 .4-2-1.5-1.4 2-.3z"/></svg>';
   const u = S.users[S.me] || {};
-  const canNotif = 'Notification' in window && Notification.permission === 'default';
   return `<div><div class="eyebrow">${esc(month)}</div><h1>Samen</h1><p class="muted">Geen ranglijst. Hier telt hoe vaak jullie samen bewegen.</p></div>
     ${banner()}
     <div class="goal"><div class="eyebrow" style="color:inherit;opacity:.8">Samen-doel van het team</div>
@@ -634,7 +674,7 @@ function vSamen() {
     <div class="badges">${BADGES.map((b) => `<div class="badge ${earned[b.id] ? 'on' : ''}"><div class="medal">${medal}</div><div><b>${b.name}</b><span>${earned[b.id] ? 'Behaald' : b.how}</span></div></div>`).join('')}</div>
     <h2>Instellingen</h2>
     ${isStandalone() ? '' : `<details id="dinstall" class="box"><summary style="cursor:pointer;font-weight:800">Zet de app op je beginscherm</summary><div style="margin-top:10px">${installHtml(false)}</div></details>`}
-    ${canNotif ? '<button class="secondary" type="button" data-act="notifperm">Meldingen ook tonen als de app op de achtergrond staat</button>' : ''}
+    ${pushSettingsHtml()}
     ${S.mode === 'local' ? '<button class="secondary" type="button" data-act="simulate">Simuleer: een collega plant een wandeling</button>' : ''}
     <button class="secondary" type="button" data-tab="dash">Management</button>
     ${S.mode === 'local' ? '<button class="danger" type="button" data-act="reset" style="align-self:flex-start">Demo opnieuw beginnen</button>' : ''}`;
@@ -841,6 +881,8 @@ async function handle(el) {
     el.disabled = true;
     try {
       const id = await store.create(payload); store.track('create', { act: id });
+      // seintje aan de push-Worker: collega's krijgen meteen een melding (en niet pas binnen de minuut)
+      if (S.mode === 'shared' && pushConfig.workerUrl) fetch(`${pushConfig.workerUrl}/run?c=${encodeURIComponent(S.ck)}`, { mode: 'no-cors' }).catch(() => {});
       S.draft = null; S.detail = null; S.tab = 'agenda'; S.filter = 'all'; S.justAdded = id; render();
       const c = document.querySelector(`[data-open="${id}"]`);
       if (c) c.scrollIntoView({ block: 'center', behavior: 'smooth' }); else window.scrollTo(0, 0);
@@ -879,7 +921,13 @@ async function handle(el) {
   if (act === 'admlogout') { await admStore.logout(); S.admin = null; S.tab = 'samen'; history.replaceState(null, '', location.pathname + location.search); render(); toast('Je bent afgemeld als beheerder.'); return; }
   if (act === 'csv-users') { const D = dashData(); csvDownload('wandelbuddy-testers.csv', [['Naam', 'Bedrijf', 'Keer geopend', 'Activiteiten gezien', 'Doe mee getikt', 'Zelf gepland', 'Stappen', 'Beweegminuten'], ...D.perUser.map((r) => [r.name, r.company, r.opens, r.seen, r.joined, r.planned, r.steps, r.minutes])]); return; }
   if (act === 'csv-acts') { const D = dashData(); csvDownload('wandelbuddy-activiteiten.csv', [['Datum', 'Uur', 'Activiteit', 'Duur (min)', 'Vertrek', 'Georganiseerd door', 'Gezien door', 'Doe mee getikt', 'Totaal deelnemers', 'Conversie %'], ...D.perAct.map((r) => [r.a.date, r.a.time, TYPES[r.a.type]?.label || r.a.type, r.a.dur, r.a.place, D.realName(r.a.by), r.seen, r.joined, r.total, r.seen ? r.conv : ''])]); return; }
-  if (act === 'notifperm') { try { const p = await Notification.requestPermission(); toast(p === 'granted' ? 'Meldingen staan aan op dit toestel.' : 'Meldingen niet toegestaan. In de app krijg je ze wel.'); } catch (e) { toast('Deze browser ondersteunt dat niet. In de app krijg je ze wel.'); } render(); return; }
+  if (act === 'pushon') {
+    el.disabled = true;
+    try { S.pushOn = await pushSubscribe(true); toast(S.pushOn ? 'Meldingen staan aan op dit toestel.' : Notification.permission === 'denied' ? 'Meldingen zijn niet toegestaan. Je kunt ze aanzetten in de instellingen van je toestel.' : 'Meldingen aanzetten lukte niet.'); }
+    catch (e) { console.error(e); toast('Meldingen aanzetten lukte niet op dit toestel.'); }
+    render(); return;
+  }
+  if (act === 'push-hide') { ls.set('wb-push-hidden', '1'); render(); toast('Je kunt meldingen later aanzetten in het tabblad Samen.'); return; }
   if (act === 'simulate') { S.tab = 'agenda'; render(); store.simulate(); return; }
   if (act === 'reset') { await store.reset(); S.detail = null; S.notifQ = []; S.reminded = new Set(); ls.set('wb-reminded', '[]'); showPop(); toast('Demo opnieuw gestart.'); return; }
 }
@@ -902,7 +950,14 @@ document.addEventListener('input', (e) => {
   if (k === 'company') { const sg = $('#sugg'); if (sg) sg.innerHTML = suggHtml(); }
 });
 document.addEventListener('change', (e) => { if (e.target.id === 'photo-in') { const f = e.target.files && e.target.files[0]; e.target.value = ''; handlePhoto(f); return; } if ((e.target.id === 'ctime' || e.target.id === 'cplace') && S.draft) { readDraftInputs(); render(); } });
-window.addEventListener('hashchange', () => { if (location.hash === '#dashboard') { S.tab = 'dash'; S.detail = null; S.draft = null; render(); } });
+window.addEventListener('hashchange', () => { if (location.hash === '#dashboard') { S.tab = 'dash'; S.detail = null; S.draft = null; render(); } else openFromHash(); });
+// tik op een melding → de app opent bij die activiteit (#a=<id>)
+function openFromHash() {
+  const m = /^#a=([A-Za-z0-9_-]+)/.exec(location.hash); if (!m) return;
+  S.detail = m[1]; S.draft = null; S.tab = 'agenda'; history.replaceState(null, '', location.pathname + location.search);
+  if (S.mode !== 'loading') { render(); window.scrollTo(0, 0); }
+}
+if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', (e) => { if (e.data && e.data.type === 'open' && e.data.hash) { location.hash = e.data.hash; } });
 // herinnering 10 minuten voor de start van iets waaraan je meedoet
 function checkReminders() {
   if (S.mode === 'loading' || !S.me || !store) return;
@@ -931,7 +986,7 @@ setInterval(() => {
 
 // ---------- start ----------
 async function boot() {
-  if (location.hash === '#dashboard') S.tab = 'dash';
+  if (location.hash === '#dashboard') S.tab = 'dash'; else openFromHash();
   const cfg = S.cfgFile;
   if (cfg) {
     try {
@@ -944,6 +999,8 @@ async function boot() {
       trackOpen();
       // was dit toestel al aangemeld als beheerder? dan meteen terug in het dashboard
       admStore.restore().then((a) => { if (a && (a.company === '*' || a.company === S.ck)) openAdmin(a); });
+      // staan meldingen al aan op dit toestel? dan het meldingsadres stil bijwerken
+      if (pushPossible() && Notification.permission === 'granted') pushSubscribe(false).then((ok) => { S.pushOn = ok; refresh(); }).catch(() => {});
       return;
     } catch (e) {
       console.error(e);

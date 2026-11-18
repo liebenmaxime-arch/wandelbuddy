@@ -3,8 +3,8 @@
 //   zonder internet valt hij terug op de bewaarde kopie.
 // - De Firebase-bibliotheek (vaste versie) wordt bewaard, zodat de app sneller opent.
 // - Gegevens uit de database (Firestore) gaan nooit via deze cache.
-const CACHE = 'wandelbuddy-v1';
-const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'firebase-config.js', 'manifest.json', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
+const CACHE = 'wandelbuddy-v2';
+const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'firebase-config.js', 'push-config.js', 'manifest.json', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -39,4 +39,25 @@ self.addEventListener('fetch', (e) => {
     })));
   }
   // al de rest (database, lettertypes) gaat gewoon rechtstreeks naar het internet
+});
+
+// ---------- pushmeldingen (verstuurd door de Cloudflare Worker) ----------
+self.addEventListener('push', (e) => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch (x) { d = { body: e.data ? e.data.text() : '' }; }
+  e.waitUntil(self.registration.showNotification(d.title || 'Wandelbuddy', {
+    body: d.body || '', tag: d.tag || undefined, renotify: !!d.tag, icon: 'icons/icon-192.png', badge: 'icons/icon-192.png',
+    data: { url: d.url || './' },
+  }));
+});
+// tik op de melding: de app openen (of naar voren halen) bij die activiteit
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const url = new URL((e.notification.data && e.notification.data.url) || './', self.registration.scope);
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+    for (const c of list) {
+      if (c.url.startsWith(self.registration.scope)) { c.postMessage({ type: 'open', hash: url.hash }); return c.focus(); }
+    }
+    return self.clients.openWindow(url.href);
+  }));
 });

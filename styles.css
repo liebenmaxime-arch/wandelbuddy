@@ -109,6 +109,8 @@ p { margin: 0; }
 .person { display: flex; align-items: center; gap: 10px; }
 .av { width: 34px; height: 34px; border-radius: 50%; color: #fff; font-weight: 800; font-size: 13px; display: grid; place-items: center; flex: none; }
 .person small { color: var(--muted); display: block; }
+.status { border-radius: 12px; padding: 10px 12px; font-size: 13px; font-weight: 700; }
+.status.ok { background: var(--green-soft); color: var(--green); }
 /* uitleg web-app op het beginscherm */
 .install { border: 1.5px solid var(--green); }
 .install .linkbtn { flex: none; }

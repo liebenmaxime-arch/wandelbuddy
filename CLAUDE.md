@@ -34,6 +34,14 @@ Webapp waarin collega's een middagwandeling of andere activiteit plannen. Andere
 - Databaseregels staan in `firestore.rules`. Na een wijziging moet Maxime ze zelf plakken in Firebase → Firestore → Rules → Publish.
 - Regels in het kort: leden lezen activiteiten/joins/users/config van hun bedrijf; schrijven alleen hun eigen profiel (alleen photo/lastSeen/authUids mogen veranderen), eigen activiteiten en eigen joins; views/events alleen schrijven. Beheerders van het bedrijf lezen alles van dat bedrijf en passen config aan. Alleen de hoofdcode mag verwijderen.
 
+## Pushmeldingen (deel F)
+- Web Push met VAPID. Publieke sleutel + Worker-adres in `push-config.js`. Private sleutel staat alleen in `~/Desktop/wandelbuddy-geheimen/` (buiten de repo) en als geheim `VAPID_PRIVATE_JWK` in de Cloudflare Worker.
+- Cloudflare Worker `wandelbuddy-push` (https://wandelbuddy-push.liebenmaxime.workers.dev), code in `push-worker/worker.js`. Maxime plakt die code zelf in Cloudflare (Edit code → Deploy). Cron Trigger elke minuut; werkt alleen van 6 tot 21 uur (Brussel).
+- De Worker leest Firestore als `robot@wandelbuddy-9c08c.firebaseapp.com` (in `admins` met company "*"); wachtwoord als geheim `ROBOT_PASSWORD`. Cloudflare-geheimen wijzigen: Settings → Variables and Secrets → Edit → **Rotate** → nieuwe waarde → Deploy.
+- `/status` op de Worker toont of beide geheimen werken. `/run?c=<bedrijf>` wordt door de app aangeroepen na het plannen.
+- Meldingsadressen: `companies/{c}/push/{id}`; verzendlogboek: `companies/{c}/pushlog/{n_|r_}<activiteit>`.
+- iPhone: alleen vanaf iOS 16.4 en vanuit de app op het beginscherm.
+
 ## Beheerders (managementdashboard)
 - Knop "Management" in het tabblad Samen → beheerderscode. De code is het wachtwoord van een Firebase Auth e-mail/wachtwoord-account. De app gebruikt een aparte Firebase-app "beheer" voor die sessie.
 - E-mailadressen (verborgen in de app): `beheer-<companyKey>@wandelbuddy-9c08c.firebaseapp.com` per bedrijf, `team@wandelbuddy-9c08c.firebaseapp.com` voor de hoofdcode.
