@@ -57,6 +57,8 @@ Webapp waarin collega's een middagwandeling of andere activiteit plannen. Andere
 - Meldingsadressen: `companies/{c}/push/{id}`; verzendlogboek: `companies/{c}/pushlog/{n_|r_}<activiteit>`.
 - iPhone: alleen vanaf iOS 16.4 en vanuit de app op het beginscherm.
 - Getest op 18 nov 2026: melding "nieuwe activiteit" komt aan op Maximes iPhone (Apple antwoordt 201). `/run?c=<bedrijf>` geeft een verslag (`log`) met aantallen en de status van Apple/Google; handig bij problemen.
+- Afmelden: knop "Afmelden op dit toestel" in Samen (twee keer tikken binnen 5 s). Verwijdert het meldingsadres van dit toestel bij dat bedrijf, meldt een beheerder af en wist `wb-pid`/`wb-ck`; het profiel blijft bewaard (opnieuw aanmelden → "Ben jij dit?").
+- Nog op te ruimen met de hoofdcode: testbedrijven "Testbedrijf Claude" en "Testbedrijf Claude B" (testgebruiker "Test Afmeld", van de afmeldtest).
 - Herinneringen: elke deelnemer krijgt zijn eigen herinnering (pushlog `r_<activiteit>_<profiel>`), ook wie pas later meedoet.
 - Eindtest gedaan op 18–19 nov 2026; alle testgegevens zijn opgeruimd. Enige bedrijf nu: Uhasselt met Maxime Lieben. Nog niet getest op de telefoon: de herinnering 10 min vooraf (minuutcontrole draaide toen nog niet).
 

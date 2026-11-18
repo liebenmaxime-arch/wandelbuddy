@@ -260,9 +260,15 @@ function sharedStore(F, db) {
     // meldingsadres van dit toestel bewaren (de Cloudflare Worker leest het als robot-beheerder)
     async savePush(j) {
       if (!ck || !S.me || !j || !j.endpoint || !j.keys) return;
-      const h = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(j.endpoint)));
-      const id = 'p_' + Array.from(h.slice(0, 16), (b) => b.toString(16).padStart(2, '0')).join('');
-      await setDoc(dref('push', id), { endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth, pid: S.me, at: Date.now(), ios: isIOS() });
+      await setDoc(dref('push', await pushId(j.endpoint)), { endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth, pid: S.me, at: Date.now(), ios: isIOS() });
+    },
+    // bij afmelden: dit toestel krijgt geen meldingen meer van dit bedrijf
+    async removePush() {
+      if (!ck || !S.me || !('serviceWorker' in navigator)) return;
+      const reg = await navigator.serviceWorker.getRegistration(); const sub = reg && reg.pushManager ? await reg.pushManager.getSubscription() : null;
+      if (!sub) return;
+      try { await deleteDoc(dref('push', await pushId(sub.endpoint))); } catch (e) {}
+      try { await sub.unsubscribe(); } catch (e) {}
     },
     async view(act) { if (!ck) return; try { await setDoc(dref('views', `${act}__${S.me}`), { act, uid: S.me, at: Date.now() }); } catch (e) {} },
     async track(kind, extra = {}) { if (!ck) return; try { await addDoc(col('events'), { kind, uid: S.me, at: Date.now(), ...extra }); } catch (e) {} },
@@ -483,6 +489,8 @@ function installHtml(withLater) {
 // iPhone: alleen vanaf iOS 16.4 en alleen als de app op het beginscherm staat.
 const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
 const pushPossible = () => S.mode === 'shared' && !!S.me && !!pushConfig.vapidPublicKey && pushSupported() && !(isIOS() && !isStandalone());
+// vaste naam voor het meldingsadres van dit toestel (zelfde adres = zelfde document)
+const pushId = async (endpoint) => { const h = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(endpoint))); return 'p_' + Array.from(h.slice(0, 16), (b) => b.toString(16).padStart(2, '0')).join(''); };
 const keyBytes = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (s.length % 4)) % 4)), (c) => c.charCodeAt(0));
 async function pushSubscribe(ask) {
   if (!pushPossible()) return false;
@@ -826,6 +834,8 @@ function vSamen() {
     ${pushSettingsHtml()}
     ${S.mode === 'local' ? '<button class="secondary" type="button" data-act="simulate">Simuleer: een collega plant een wandeling</button>' : ''}
     <button class="secondary" type="button" data-tab="dash">Management</button>
+    ${S.mode === 'shared' ? `<button class="danger" type="button" data-act="logout" style="align-self:flex-start">${S.confirmLogout ? 'Tik nog eens om af te melden' : 'Afmelden op dit toestel'}</button>
+      <p class="note" style="margin-top:-12px">Je profiel en je geschiedenis blijven bewaard. Meld je later opnieuw aan met dezelfde naam en hetzelfde bedrijf om verder te gaan.</p>` : ''}
     ${S.mode === 'local' ? '<button class="danger" type="button" data-act="reset" style="align-self:flex-start">Demo opnieuw beginnen</button>' : ''}`;
 }
 
@@ -1092,6 +1102,15 @@ async function handle(el) {
     try { S.pushOn = await pushSubscribe(true); toast(S.pushOn ? 'Meldingen staan aan op dit toestel.' : Notification.permission === 'denied' ? 'Meldingen zijn niet toegestaan. Je kunt ze aanzetten in de instellingen van je toestel.' : 'Meldingen aanzetten lukte niet.'); }
     catch (e) { console.error(e); toast('Meldingen aanzetten lukte niet op dit toestel.'); }
     render(); return;
+  }
+  if (act === 'logout') {
+    if (!S.confirmLogout) { S.confirmLogout = true; render(); setTimeout(() => { if (S.confirmLogout) { S.confirmLogout = false; refresh(); } }, 5000); return; }
+    el.disabled = true; el.textContent = 'Even geduld…';
+    try { if (store.removePush) await store.removePush(); } catch (e) { console.warn(e); }
+    try { if (admStore) await admStore.logout(); } catch (e) {}
+    for (const k of ['wb-pid', 'wb-ck', 'wb-seen', 'wb-reminded']) { try { localStorage.removeItem(k); } catch (e) {} }
+    location.replace(location.pathname + location.search); // opnieuw starten op het aanmeldscherm
+    return;
   }
   if (act === 'push-hide') { ls.set('wb-push-hidden', '1'); render(); toast('Je kunt meldingen later aanzetten in het tabblad Samen.'); return; }
   if (act === 'simulate') { S.tab = 'agenda'; render(); store.simulate(); return; }
