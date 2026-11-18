@@ -5,7 +5,8 @@
 //     1. nieuwe activiteiten  → melding naar alle collega's van hetzelfde bedrijf (niet naar de organisator)
 //     2. activiteiten die binnen 10 minuten beginnen → herinnering naar wie meedoet
 // - De app roept ook /run?c=<bedrijf> aan net na het plannen, zodat nieuwe activiteiten meteen gemeld worden.
-// - Elke melding wordt maar één keer verstuurd (bijgehouden in companies/<bedrijf>/pushlog).
+// - Elke persoon krijgt elke melding maar één keer (bijgehouden in companies/<bedrijf>/pushlog).
+//   Per keer vertrekken er hoogstens MAX_SENDS meldingen; de rest volgt de minuut erna.
 //
 // Geheimen (NIET in deze code, maar in Cloudflare → Settings → Variables and Secrets):
 //   VAPID_PRIVATE_JWK  de private VAPID-sleutel (JSON)
@@ -20,7 +21,7 @@ const APP_URL = 'https://liebenmaxime-arch.github.io/wandelbuddy/';
 const TZ = 'Europe/Brussels';
 const DB = `https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/(default)/documents`;
 const LABELS = { wandelen: 'Wandelen', lopen: 'Lopen', padel: 'Padel', fietsen: 'Fietsen', stretch: 'Yoga' };
-const MAX_SENDS = 35; // gratis plan: max 50 externe oproepen per keer
+const MAX_SENDS = 30; // gratis plan: max 50 externe oproepen per keer; de rest is voor de database. Wie erbuiten valt, krijgt zijn melding de minuut erna.
 
 // ---------- hulpjes ----------
 const enc = new TextEncoder();
@@ -130,10 +131,33 @@ async function query(env, c, coll, field, op, value) {
   if (!r.ok) throw new Error(`query ${coll} ${r.status}`);
   return (await r.json()).filter((x) => x.document).map((x) => docOut(x.document));
 }
-// "deze melding is verstuurd": lukt maar één keer per activiteit (anders bestond hij al)
-async function claim(env, c, id) {
-  const r = await fs(env, `/companies/${c}/pushlog/${id}?currentDocument.exists=false`, { method: 'PATCH', body: JSON.stringify({ fields: { at: { integerValue: String(Date.now()) } } }) });
-  return r.ok;
+// Wie krijgt deze melding nu? (key = "n_<activiteit>" of "r_<activiteit>")
+// 1) in één oproep opvragen wie ze al kreeg, 2) de rest kiezen binnen de grens, 3) in één oproep noteren.
+// Het noteren lukt alleen als niemand anders net hetzelfde deed; anders volgende minuut opnieuw (nooit dubbel).
+async function claimBatch(env, c, key, candidates, byPid, budget) {
+  if (!candidates.length) return [];
+  const done = new Set((await query(env, c, 'pushlog', 'act', 'EQUAL', key)).map((d) => d.pid));
+  const todo = fitBudget(candidates.filter((p) => !done.has(p)), byPid, budget);
+  if (!todo.length) return [];
+  const writes = todo.map((p) => ({ update: { name: `projects/${PROJECT}/databases/(default)/documents/companies/${c}/pushlog/${key}_${p}`, fields: { act: { stringValue: key }, pid: { stringValue: p }, at: { integerValue: String(Date.now()) } } }, currentDocument: { exists: false } }));
+  const r = await fs(env, ':commit', { method: 'POST', body: JSON.stringify({ writes }) });
+  if (!r.ok) { budget.log.push({ c, stap: 'logboek bezet, volgende minuut opnieuw', key, status: r.status }); return []; }
+  return todo;
+}
+// meldingsadressen van een bedrijf, per persoon gegroepeerd (één keer per run opgehaald)
+async function subsByPid(env, c, cache) {
+  if (!cache.has(c)) {
+    const m = new Map();
+    for (const s of await listDocs(env, `/companies/${c}/push`)) { if (!m.has(s.pid)) m.set(s.pid, []); m.get(s.pid).push(s); }
+    cache.set(c, m);
+  }
+  return cache.get(c);
+}
+// kies zoveel personen als er nog meldingen mogen vertrekken in deze run; de rest komt de volgende minuut
+function fitBudget(pids, byPid, budget) {
+  const out = []; let n = 0;
+  for (const p of pids) { const k = (byPid.get(p) || []).length; if (!k) continue; if (n + k > budget.left) break; out.push(p); n += k; }
+  return out;
 }
 
 // ---------- het eigenlijke werk ----------
@@ -155,53 +179,54 @@ async function deliver(env, c, subs, message, vapid, budget) {
 async function nameOf(env, c, pid) { const u = await getDoc(env, `/companies/${c}/users/${pid}`); return (u && u.name) || 'Een collega'; }
 const labelOf = (a) => a.label || LABELS[a.type] || 'Sporten';
 
-async function newActivities(env, c, now, vapid, budget) {
+// nieuwe activiteit → melding naar elke collega met meldingen aan (niet naar de organisator).
+// Per persoon bijgehouden: wie deze keer buiten de grens valt, krijgt de melding de minuut erna.
+async function newActivities(env, c, now, vapid, budget, cache) {
   const recent = await query(env, c, 'activities', 'createdAt', 'GREATER_THAN', Date.now() - 15 * 60000);
   budget.log.push({ c, stap: 'nieuwe activiteiten', aantal: recent.length });
   let sent = 0;
   for (const a of recent) {
+    if (budget.left <= 0) { budget.log.push({ c, stap: 'grens bereikt, rest volgende minuut' }); break; }
     if (a.date < now.date || (a.date === now.date && toMin(a.time) + (a.dur || 0) <= now.min)) continue; // al voorbij
-    if (!(await claim(env, c, 'n_' + a.id))) { budget.log.push({ c, stap: 'al gemeld', act: a.id }); continue; }
-    const all = await listDocs(env, `/companies/${c}/push`);
-    const subs = all.filter((s) => s.pid !== a.by);
-    budget.log.push({ c, stap: 'meldingsadressen', totaal: all.length, zonderOrganisator: subs.length });
-    if (!subs.length) continue;
+    const byPid = await subsByPid(env, c, cache);
+    const todo = await claimBatch(env, c, 'n_' + a.id, [...byPid.keys()].filter((p) => p !== a.by), byPid, budget);
+    budget.log.push({ c, stap: 'nieuwe activiteit', act: a.id, personen: todo.length });
+    if (!todo.length) continue;
     const who = await nameOf(env, c, a.by);
     const msg = { title: `${who} gaat ${labelOf(a).toLowerCase()}`, body: `${dayLabel(a.date, now.date)} om ${hhmm(a.time)} · ${a.dur} min · vertrek: ${a.place}`, tag: a.id, url: `./#a=${a.id}` };
-    sent += await deliver(env, c, subs, msg, vapid, budget);
+    for (const p of todo) sent += await deliver(env, c, byPid.get(p), msg, vapid, budget);
   }
   return sent;
 }
-async function reminders(env, c, now, vapid, budget) {
+// herinnering 10 minuten vooraf → naar elke deelnemer (ook wie pas later op "Doe mee" tikt), per persoon één keer
+async function reminders(env, c, now, vapid, budget, cache) {
   const today = await query(env, c, 'activities', 'date', 'EQUAL', now.date);
   let sent = 0;
   for (const a of today) {
+    if (budget.left <= 0) { budget.log.push({ c, stap: 'grens bereikt, rest volgende minuut' }); break; }
     const left = toMin(a.time) - now.min;
     if (left <= 0 || left > 10) continue;
-    // elke deelnemer krijgt zijn eigen herinnering (ook wie pas later op "Doe mee" tikt), maar maar één keer
-    const pids = new Set((await query(env, c, 'joins', 'act', 'EQUAL', a.id)).map((j) => j.uid));
-    if (!pids.size) continue;
-    const all = await listDocs(env, `/companies/${c}/push`);
+    const joined = [...new Set((await query(env, c, 'joins', 'act', 'EQUAL', a.id)).map((j) => j.uid))];
+    const byPid = await subsByPid(env, c, cache);
+    const todo = await claimBatch(env, c, 'r_' + a.id, joined, byPid, budget);
+    if (!todo.length) continue;
+    budget.log.push({ c, stap: 'herinnering', act: a.id, minuten: left, personen: todo.length });
     const msg = { title: `Over ${left} ${left === 1 ? 'minuut' : 'minuten'}: ${labelOf(a).toLowerCase()}`, body: `Om ${hhmm(a.time)} · vertrek aan ${a.place}`, tag: 'r' + a.id, url: `./#a=${a.id}` };
-    for (const pid of pids) {
-      const subs = all.filter((s) => s.pid === pid); if (!subs.length) continue;
-      if (!(await claim(env, c, `r_${a.id}_${pid}`))) continue;
-      budget.log.push({ c, stap: 'herinnering', act: a.id, minuten: left });
-      sent += await deliver(env, c, subs, msg, vapid, budget);
-    }
+    for (const p of todo) sent += await deliver(env, c, byPid.get(p), msg, vapid, budget);
   }
   return sent;
 }
 async function run(env, onlyCompany) {
   const now = nowBE();
   const vapid = await makeVapid(env.VAPID_PRIVATE_JWK);
-  const budget = { left: MAX_SENDS, log: [] };
+  const budget = { left: MAX_SENDS, log: [] }; const cache = new Map();
   const companies = onlyCompany ? [onlyCompany] : (await listDocs(env, '/companies')).map((x) => x.id);
   let sent = 0;
   for (const c of companies) {
     try {
-      sent += await newActivities(env, c, now, vapid, budget);
-      if (!onlyCompany) sent += await reminders(env, c, now, vapid, budget);
+      // eerst herinneringen (die zijn tijdgebonden), dan nieuwe activiteiten
+      if (!onlyCompany) sent += await reminders(env, c, now, vapid, budget, cache);
+      sent += await newActivities(env, c, now, vapid, budget, cache);
     } catch (e) { budget.log.push({ c, stap: 'fout', fout: String(e).slice(0, 160) }); }
   }
   for (const l of budget.log) console.log(JSON.stringify(l));
