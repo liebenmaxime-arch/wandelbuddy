@@ -38,13 +38,26 @@ const TIMES = ['11:45', '12:00', '12:15', '12:30', '12:45', '13:00', '13:45'];
 const PLACES = ['Inkom', 'Parking', 'Refter'];
 const COLORS = ['#2E7D5B', '#2B6CB0', '#B23E73', '#7B5BB5', '#C2571B', '#3F7F8C', '#8A6A1F'];
 const PACKS = [100, 150, 200];
+// Badges: worden automatisch berekend (zie earnedBadges). Elk een eigen symbool.
+const bI = (inner) => `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
+const bNum = (n) => bI(`<circle cx="12" cy="12" r="9"/><text x="12" y="15.6" text-anchor="middle" font-size="${String(n).length > 1 ? 9.5 : 11}" font-weight="800" font-family="Manrope, system-ui, sans-serif" fill="currentColor" stroke="none">${n}</text>`);
 const BADGES = [
-  { id: 'first', name: 'Eerste stap', how: 'Doe één keer mee' },
-  { id: 'lead', name: 'Trekker', how: 'Organiseer zelf een activiteit' },
-  { id: 'connect', name: 'Verbinder', how: 'Beweeg met 5 verschillende collega\'s' },
-  { id: 'habit', name: 'Vaste gewoonte', how: 'Doe mee in 3 verschillende weken' },
-  { id: 'mix', name: 'Allrounder', how: 'Probeer 2 soorten activiteiten' },
-  { id: 'steps', name: '10.000 samen', how: 'Zet in totaal 10.000 stappen' },
+  { id: 'first', name: 'Eerste stap', how: 'Doe één keer mee', icon: bI('<path d="M8 3c2 0 3 2.2 3 5s-1 5-3 5-3-2.2-3-5 1-5 3-5zM16 11c2 0 3 2.2 3 4.6S18 20.5 16 20.5s-3-2.3-3-4.9S14 11 16 11z"/>') },
+  { id: 'lead', name: 'Trekker', how: 'Organiseer zelf een activiteit', icon: bI('<path d="M5 21V4M5 4h12l-2.5 4L17 12H5"/>') },
+  { id: 'connect', name: 'Verbinder', how: 'Beweeg met 5 verschillende collega\'s', icon: bI('<circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M3 20c.6-3.4 3-5.4 6-5.4s5.4 2 6 5.4M15.5 14.7c2.6-.3 4.8 1.4 5.5 4.3"/>') },
+  { id: 'habit', name: 'Vaste gewoonte', how: 'Doe mee in 3 verschillende weken', icon: bI('<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4M8.5 15.5l2.5 2.5 4.5-5"/>') },
+  { id: 'mix', name: 'Allrounder', how: 'Probeer 2 soorten activiteiten', icon: bI('<path d="M4 7h3c4 0 6 10 10 10h3M4 17h3c1.6 0 2.8-1.5 4-3.4M13 10.4C14.2 8.5 15.4 7 17 7h3M17 4l3 3-3 3M17 14l3 3-3 3"/>') },
+  { id: 'steps', name: '10.000 samen', how: 'Zet in totaal 10.000 stappen', icon: bI('<path d="M7 20l3-8 3 3 2-6M14 6.5a1.8 1.8 0 1 0 0-.1M4 20h16"/>') },
+  { id: 'five', name: 'Op dreef', how: 'Doe 5 keer mee', icon: bNum(5) },
+  { id: 'ten', name: 'Tien keer samen', how: 'Doe 10 keer mee', icon: bNum(10) },
+  { id: 'twentyfive', name: 'Doorzetter', how: 'Doe 25 keer mee', icon: bNum(25) },
+  { id: 'streak', name: 'Op ritme', how: 'Doe 3 weken na elkaar mee', icon: bI('<path d="M12 21c-3.9 0-6-2.6-6-5.6 0-3.2 2.4-5 3.4-8 .8 1.6 1.6 2.6 2.8 3.2C12.7 7.5 13.6 5 15.5 3c.3 3.4 2.5 5.6 2.5 10.2 0 4.6-2.6 7.8-6 7.8z"/>') },
+  { id: 'lead5', name: 'Gangmaker', how: 'Organiseer 5 activiteiten', icon: bI('<path d="M3 10v4h3l7 5V5L6 10zM16 9a4 4 0 0 1 0 6M18.5 6.5a7.5 7.5 0 0 1 0 11"/>') },
+  { id: 'connect10', name: 'Teamspeler', how: 'Beweeg met 10 verschillende collega\'s', icon: bI('<circle cx="12" cy="7" r="2.6"/><circle cx="5.5" cy="9.5" r="2.1"/><circle cx="18.5" cy="9.5" r="2.1"/><path d="M7.5 20c.4-3 2.2-5 4.5-5s4.1 2 4.5 5M2 18.5c.3-2.2 1.6-3.6 3.5-3.6M22 18.5c-.3-2.2-1.6-3.6-3.5-3.6"/>') },
+  { id: 'sports3', name: 'Ontdekker', how: 'Probeer 3 verschillende sporten', icon: bI('<circle cx="12" cy="12" r="9"/><path d="M15.5 8.5l-2 5-5 2 2-5z"/>') },
+  { id: 'steps50', name: '50.000 samen', how: 'Zet in totaal 50.000 stappen', icon: bI('<path d="M2.5 20.5L9 9l3.5 6 2.5-4 6.5 9.5z"/><path d="M15 11V4l4 1.5-4 1.5"/>') },
+  { id: 'other', name: 'Avonturier', how: 'Doe voor het eerst mee met een andere sport', icon: bI('<path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"/>') },
+  { id: 'buddy', name: 'Meenemer', how: 'Iemand die voor het eerst meedoet, doet mee aan jouw activiteit', icon: bI('<path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/>') },
 ];
 
 // ---------- helpers ----------
@@ -79,7 +92,7 @@ const AUTO_NOTE = 'Stappen worden automatisch gekoppeld';
 const ls = { get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} } };
 const rid = (n = 14) => { const a = new Uint8Array(n); crypto.getRandomValues(a); return Array.from(a, (b) => 'abcdefghijkmnpqrstuvwxyz23456789'[b % 32]).join(''); };
 let toastTimer;
-function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 3200); }
+function toast(msg, ms = 3200) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, ms); }
 
 async function loadFirebase(cfg) {
   const A = await import(`https://www.gstatic.com/firebasejs/${FB_VER}/firebase-app.js`);
@@ -197,7 +210,7 @@ function sharedStore(F, db) {
     // luisteren naar de gegevens van één bedrijf
     open(key) {
       stops.forEach((f) => f()); stops = []; ck = key; t0 = Date.now();
-      S.loadedActs = false; S.acts = []; S.joins = []; S.users = {}; S.views = []; S.events = []; S.cfg = null;
+      S.loadedActs = false; S.loadedJoins = false; S.acts = []; S.joins = []; S.users = {}; S.views = []; S.events = []; S.cfg = null;
       clearTimeout(timer); timer = setTimeout(() => { if (!S.loadedActs) { S.offline = true; refresh(); } }, 10000);
       stops.push(onSnapshot(query(col('activities'), orderBy('date', 'desc'), limit(500)), (s) => {
         S.acts = rows(s);
@@ -208,7 +221,7 @@ function sharedStore(F, db) {
         }
         S.loadedActs = true; S.offline = false; S.denied = false; clearTimeout(timer); refresh();
       }, fail));
-      stops.push(onSnapshot(col('joins'), (s) => { S.joins = rows(s); refresh(); }, fail));
+      stops.push(onSnapshot(col('joins'), (s) => { S.joins = rows(s); S.loadedJoins = true; refresh(); }, fail));
       stops.push(onSnapshot(col('users'), (s) => { const u = {}; s.docs.forEach((d) => { u[d.id] = d.data(); }); S.users = u; refresh(); }, fail));
       // "gezien" en gebeurtenissen kan alleen een beheerder lezen (zie adminStore)
       stops.push(onSnapshot(dref('config', 'main'), (d) => { S.cfg = d.exists() ? d.data() : null; refresh(); }, () => {}));
@@ -336,6 +349,64 @@ function mine() {
     led: S.acts.filter((a) => a.by === S.me).length,
   };
 }
+// ---------- badges (voor iedereen automatisch berekend uit de activiteiten en deelnames) ----------
+const weekNo = (s) => { const d = parseDate(s); return Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate() - ((d.getDay() + 6) % 7)) / 6048e5); };
+let firstCache = { acts: null, joins: null, map: null };
+// per persoon: de activiteit waaraan hij/zij voor het eerst meedeed (voor de badge "Meenemer")
+function firstActs() {
+  if (firstCache.acts === S.acts && firstCache.joins === S.joins) return firstCache.map;
+  const map = new Map();
+  for (const j of S.joins) {
+    const a = actById(j.act); if (!a || !isPast(a)) continue;
+    const cur = map.get(j.uid); if (!cur || (a.date + a.time) < (cur.date + cur.time)) map.set(j.uid, a);
+  }
+  firstCache = { acts: S.acts, joins: S.joins, map };
+  return map;
+}
+function statsFor(uid) {
+  const done = S.joins.filter((j) => j.uid === uid && actById(j.act) && isPast(actById(j.act)));
+  const mates = new Set(); for (const j of done) for (const o of S.joins) if (o.act === j.act && o.uid !== uid) mates.add(o.uid);
+  const weeks = [...new Set(done.map((j) => weekNo(actById(j.act).date)))].sort((a, b) => a - b);
+  let run = 0; let best = 0; let prev = null;
+  for (const w of weeks) { run = prev !== null && w === prev + 1 ? run + 1 : 1; best = Math.max(best, run); prev = w; }
+  let buddy = false; for (const [u, a] of firstActs()) if (u !== uid && a.by === uid) { buddy = true; break; }
+  return {
+    done: done.length, mates: mates.size, weeks: weeks.length, streak: best,
+    types: new Set(done.map((j) => typeInfo(actById(j.act)).key)).size,
+    steps: done.reduce((s, j) => s + stepsOf(j), 0),
+    led: S.acts.filter((a) => a.by === uid).length,
+    other: done.some((j) => actById(j.act).type === 'sport'), buddy,
+  };
+}
+function earnedBadges(uid) {
+  const s = statsFor(uid);
+  const ok = { first: s.done >= 1, lead: s.led >= 1, connect: s.mates >= 5, habit: s.weeks >= 3, mix: s.types >= 2, steps: s.steps >= 10000,
+    five: s.done >= 5, ten: s.done >= 10, twentyfive: s.done >= 25, streak: s.streak >= 3, lead5: s.led >= 5, connect10: s.mates >= 10,
+    sports3: s.types >= 3, steps50: s.steps >= 50000, other: s.other, buddy: s.buddy };
+  return new Set(BADGES.filter((b) => ok[b.id]).map((b) => b.id));
+}
+// nieuwe badge? één keer feliciteren (op dit toestel bijgehouden; de eerste keer op een toestel stil)
+function checkNewBadges() {
+  if (S.mode !== 'shared' || !S.me || !S.ck || !S.loadedActs || !S.loadedJoins) return;
+  const key = `wb-badges-${S.ck}-${S.me}`; const earned = [...earnedBadges(S.me)];
+  let seen = null; try { seen = JSON.parse(ls.get(key) || 'null'); } catch (e) {}
+  if (!Array.isArray(seen)) { ls.set(key, JSON.stringify(earned)); return; }
+  const fresh = earned.filter((id) => !seen.includes(id)); if (!fresh.length) return;
+  ls.set(key, JSON.stringify([...new Set([...seen, ...fresh])]));
+  const bs = fresh.map((id) => BADGES.find((b) => b.id === id));
+  celebrate(bs[0].icon, `${bs.length > 1 ? 'Nieuwe badges' : 'Nieuwe badge'}: ${bs.map((b) => b.name).join(', ')}!`); chime();
+}
+// feestelijke melding bovenaan (los van de gewone meldingen onderaan, zodat ze elkaar niet overschrijven)
+let celebrateTimer;
+function celebrate(icon, text) {
+  let el = $('#celebrate');
+  if (!el) { el = document.createElement('div'); el.id = 'celebrate'; el.className = 'celebrate'; el.setAttribute('role', 'status'); document.body.appendChild(el); }
+  el.innerHTML = `<span class="medal">${icon}</span><b>${esc(text)}</b>`; el.hidden = false; el.classList.remove('show'); void el.offsetWidth; el.classList.add('show');
+  clearTimeout(celebrateTimer); celebrateTimer = setTimeout(() => { el.hidden = true; }, 5000);
+}
+const MEDAL_S = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="14.5" r="6"/><path d="M8.5 3l3.5 5 3.5-5"/></svg>';
+const badgeTag = (uid) => { const n = earnedBadges(uid).size; return n ? `<span class="bcount" title="${n} ${n === 1 ? 'badge' : 'badges'}">${MEDAL_S}${n}</span>` : ''; };
+
 function together() {
   const mk = monthKey(todayStr());
   const js = S.joins.filter((j) => { const a = actById(j.act); return a && isPast(a) && monthKey(a.date) === mk; });
@@ -580,7 +651,7 @@ function vDetail() {
   if (!a) { if (S.mode === 'shared' && !S.loadedActs) return '<p class="loading">Activiteit laden…</p>'; S.detail = null; return vAgenda(); }
   const t = typeInfo(a); const g = goingOf(a.id); const joined = iJoined(a.id); const past = isPast(a); const isMine = a.by === S.me;
   const max = a.max || t.max; const full = max && g.length >= max && !joined;
-  const ppl = g.map((j) => `<div class="person"><div class="av" style="background:${colorFor(j.uid)}">${face(j.uid, nameOf(j.uid))}</div><div><b>${esc(nameOf(j.uid))}</b><small>${j.uid === a.by ? 'organiseert' : 'doet mee'}${past && stepsOf(j) ? ' · ' + fmtN(stepsOf(j)) + ' stappen' : ''}</small></div></div>`).join('');
+  const ppl = g.map((j) => `<div class="person"><div class="av" style="background:${colorFor(j.uid)}">${face(j.uid, nameOf(j.uid))}</div><div><b>${esc(nameOf(j.uid))}</b>${badgeTag(j.uid)}<small>${j.uid === a.by ? 'organiseert' : 'doet mee'}${past && stepsOf(j) ? ' · ' + fmtN(stepsOf(j)) + ' stappen' : ''}</small></div></div>`).join('');
   let actions = '';
   if (!past) {
     if (isMine) actions = `<button class="secondary" type="button" data-act="share">Kopieer uitnodiging</button>`;
@@ -695,8 +766,7 @@ function vSamen() {
   const goal = Math.max(1, Number(S.cfg?.goal) || 40); const reward = S.cfg?.reward || 'Stel een beloning in via het managementdashboard';
   const p = Math.min(100, pct(tg.moments, goal));
   const month = new Date().toLocaleDateString('nl-BE', { month: 'long' });
-  const earned = { first: m.done.length >= 1, lead: m.led >= 1, connect: m.mates.size >= 5, habit: m.weeks >= 3, mix: m.types >= 2, steps: m.stepsAll >= 10000 };
-  const medal = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="14" r="6"/><path d="M8.5 3l3.5 5 3.5-5M12 11.5l1 2 2 .3-1.5 1.4.4 2-1.9-1-1.9 1 .4-2-1.5-1.4 2-.3z"/></svg>';
+  const got = earnedBadges(S.me);
   const u = S.users[S.me] || {};
   return `<div><div class="eyebrow">${esc(month)}</div><h1>Samen</h1><p class="muted">Geen ranglijst. Hier telt hoe vaak jullie samen bewegen.</p></div>
     ${banner()}
@@ -718,8 +788,8 @@ function vSamen() {
       <label class="pill in" for="photo-in" role="button">${photoOf(S.me) ? 'Foto wijzigen' : 'Foto toevoegen'}</label>
       <input class="vh" type="file" id="photo-in" accept="image/*" aria-label="Profielfoto kiezen"></div>
     <p class="note" style="margin-top:-8px">Je naam en bedrijf liggen vast. Je foto zien je collega's bij de activiteiten.</p>
-    <h2>Jouw badges</h2>
-    <div class="badges">${BADGES.map((b) => `<div class="badge ${earned[b.id] ? 'on' : ''}"><div class="medal">${medal}</div><div><b>${b.name}</b><span>${earned[b.id] ? 'Behaald' : b.how}</span></div></div>`).join('')}</div>
+    <h2>Jouw badges <span class="muted small" style="font-weight:700">· ${got.size} van ${BADGES.length} behaald</span></h2>
+    <div class="badges">${BADGES.map((b) => { const on = got.has(b.id); return `<div class="badge ${on ? 'on' : ''}"><div class="medal" aria-hidden="true">${b.icon}</div><div><b>${esc(b.name)}</b><span>${on ? 'Behaald · ' + esc(b.how.charAt(0).toLowerCase() + b.how.slice(1)) : esc(b.how)}</span></div></div>`; }).join('')}</div>
     <h2>Instellingen</h2>
     ${isStandalone() ? '' : `<details id="dinstall" class="box"><summary style="cursor:pointer;font-weight:800">Zet de app op je beginscherm</summary><div style="margin-top:10px">${installHtml(false)}</div></details>`}
     ${pushSettingsHtml()}
@@ -870,6 +940,7 @@ function render(preserve = false) {
   openD.forEach((id) => { const d = document.getElementById(id); if (d) d.open = true; });
   if (focusId) { const el = document.getElementById(focusId); if (el) { el.focus({ preventScroll: true }); try { if (selS != null) el.setSelectionRange(selS, selE); } catch (e) {} } }
   lastKey = key;
+  checkNewBadges();
   const bare = needsWelcome();
   $('.nav').hidden = bare;
   document.querySelectorAll('.tab').forEach((b) => b.setAttribute('aria-current', !S.draft && !S.detail && b.dataset.tab === (S.tab === 'dash' ? 'samen' : S.tab) ? 'page' : 'false'));

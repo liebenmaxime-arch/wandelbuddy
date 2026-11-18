@@ -38,6 +38,12 @@ Webapp waarin collega's een middagwandeling of andere activiteit plannen. Andere
 - Databaseregels staan in `firestore.rules`. Na een wijziging moet Maxime ze zelf plakken in Firebase → Firestore → Rules → Publish.
 - Regels in het kort: leden lezen activiteiten/joins/users/config van hun bedrijf; schrijven alleen hun eigen profiel (alleen photo/lastSeen/authUids mogen veranderen), eigen activiteiten en eigen joins; views/events alleen schrijven. Beheerders van het bedrijf lezen alles van dat bedrijf en passen config aan. Alleen de hoofdcode mag verwijderen.
 
+## Badges (deel I)
+- 16 badges in `BADGES` (app.js), elk met eigen SVG-icoon. Berekend door `statsFor(uid)` / `earnedBadges(uid)` uit activiteiten en deelnames (geen opslag in de database).
+- Felicitatie één keer per nieuwe badge: bijgehouden in localStorage `wb-badges-<bedrijf>-<profiel>`; eerste keer op een toestel stil. Getoond met `celebrate()` bovenaan (los van `toast()`).
+- Aantal badges bij namen in "Wie doet er mee" (`badgeTag`), zonder ranglijst.
+- Testen zonder database: kopieer de app naar een map in de scratchpad met `export const firebaseConfig = {};` → de app draait dan in de demo (localStorage `wandelbuddy-fb-demo-v1`).
+
 ## Pushmeldingen (deel F)
 - Web Push met VAPID. Publieke sleutel + Worker-adres in `push-config.js`. Private sleutel staat alleen in `~/Desktop/wandelbuddy-geheimen/` (buiten de repo) en als geheim `VAPID_PRIVATE_JWK` in de Cloudflare Worker.
 - Cloudflare Worker `wandelbuddy-push` (https://wandelbuddy-push.liebenmaxime.workers.dev), code in `push-worker/worker.js`. Maxime plakt die code zelf in Cloudflare (Edit code → Deploy). Cron Trigger elke minuut; werkt alleen van 6 tot 21 uur (Brussel).
