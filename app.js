@@ -516,6 +516,32 @@ function pushCard() {
     <p class="small muted">${PUSH_WHAT}</p>
     <button class="primary" type="button" data-act="pushon">Zet meldingen aan</button></div>`;
 }
+// apart scherm meteen na het aanmelden (één keer per toestel), zodat iedereen meldingen aanzet
+const BELL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>';
+function vPushStep() {
+  if (S.pushStep === 'ios') return `<div class="welcome">
+    <div class="logo">${BELL}</div>
+    <div><h1>Meldingen op je iPhone</h1>
+      <p class="muted" style="margin-top:6px">${PUSH_WHAT} Op een iPhone lukt dat alleen vanuit de app op je beginscherm.</p></div>
+    ${installHtml(false)}
+    <p class="small muted">Open CoMove daarna van op je beginscherm. Daar vragen we je om meldingen aan te zetten.</p>
+    <button class="secondary" type="button" data-act="push-skip">Verder</button>
+  </div>`;
+  return `<div class="welcome">
+    <div class="logo">${BELL}</div>
+    <div><h1>Zet meldingen aan</h1>
+      <p class="muted" style="margin-top:6px">${PUSH_WHAT}</p></div>
+    <button class="primary" type="button" data-act="pushon">Zet meldingen aan</button>
+    <button class="linkbtn" type="button" data-act="push-skip" style="align-self:center">Nu niet</button>
+    <p class="note">Je kunt meldingen later altijd aanzetten in het tabblad Samen.</p>
+  </div>`;
+}
+// moet dit toestel het meldingenscherm nog zien?
+function pushStepFor() {
+  if (S.mode !== 'shared' || !S.me || !pushConfig.vapidPublicKey) return null;
+  if (pushPossible()) return Notification.permission === 'default' && !ls.get('wb-push-asked') ? 'ask' : null;
+  return isIOS() && !isStandalone() && !ls.get('wb-push-asked-ios') ? 'ios' : null;
+}
 function pushSettingsHtml() {
   if (S.mode !== 'shared' || !pushConfig.vapidPublicKey) return '';
   if (isIOS() && !isStandalone()) return '<p class="note">Meldingen op je iPhone: zet CoMove eerst op je beginscherm (vanaf iOS 16.4), open de app van daaruit en zet ze dan hier aan.</p>';
@@ -637,7 +663,12 @@ async function finishSignup(pid) {
   S.claim = null; S.signup = null; S.pendingProfile = null; S.pendingMembers = null;
   render(); toTop();
   toast(pid ? `Welkom terug, ${p.first}!` : `Welkom, ${p.first}!`);
-  try { await saving; trackOpen(); }
+  try {
+    await saving; trackOpen();
+    // meldingen: al toegestaan → meteen het adres bij dit bedrijf bewaren; anders het meldingenscherm tonen
+    if (pushPossible() && Notification.permission === 'granted') pushSubscribe(false).then((ok) => { S.pushOn = ok; refresh(); }).catch(() => {});
+    else { S.pushStep = pushStepFor(); if (S.pushStep) { render(); toTop(); } }
+  }
   catch (e) { try { localStorage.removeItem('wb-pid'); localStorage.removeItem('wb-ck'); } catch (x) {} S.me = null; S.ck = null; S.signup = { first: p.first, last: p.last, company: p.company }; render(); }
 }
 function vAgenda() {
@@ -968,7 +999,7 @@ function csvDownload(name, rows) {
 
 // ---------- render ----------
 let lastKey = '';
-const viewKey = () => (needsWelcome() ? (S.claim ? 'claim' : 'welcome') : S.draft ? 'draft' : S.detail ? 'detail:' + S.detail : 'tab:' + S.tab);
+const viewKey = () => (needsWelcome() ? (S.claim ? 'claim' : 'welcome') : S.pushStep ? 'push' : S.draft ? 'draft' : S.detail ? 'detail:' + S.detail : 'tab:' + S.tab);
 const needsWelcome = () => S.mode === 'shared' && !S.me;
 function render(preserve = false) {
   if (S.mode === 'loading') return;
@@ -981,6 +1012,7 @@ function render(preserve = false) {
   }
   let html;
   if (needsWelcome()) html = vWelcome();
+  else if (S.pushStep) html = vPushStep();
   else if (S.draft) html = vCreate();
   else if (S.detail) html = vDetail();
   else html = S.tab === 'samen' ? vSamen() : S.tab === 'dash' ? (S.mode === 'local' || S.admin ? vDash() : vAdminLogin()) : vAgenda();
@@ -990,7 +1022,7 @@ function render(preserve = false) {
   if (focusId) { const el = document.getElementById(focusId); if (el) { el.focus({ preventScroll: true }); try { if (selS != null) el.setSelectionRange(selS, selE); } catch (e) {} } }
   lastKey = key;
   checkNewBadges(); checkGoal();
-  const bare = needsWelcome();
+  const bare = needsWelcome() || !!S.pushStep;
   $('.nav').hidden = bare;
   document.querySelectorAll('.tab').forEach((b) => b.setAttribute('aria-current', !S.draft && !S.detail && b.dataset.tab === (S.tab === 'dash' ? 'samen' : S.tab) ? 'page' : 'false'));
   if (S.notifQ.length) showPop();
@@ -1105,7 +1137,7 @@ async function handle(el) {
   if (act === 'csv-users') { const D = dashData(); csvDownload('comove-testers.csv', [['Naam', 'Bedrijf', 'Keer geopend', 'Activiteiten gezien', 'Doe mee getikt', 'Zelf gepland', 'Stappen', 'Beweegminuten'], ...D.perUser.map((r) => [r.name, r.company, r.opens, r.seen, r.joined, r.planned, r.steps, r.minutes])]); return; }
   if (act === 'csv-acts') { const D = dashData(); csvDownload('comove-activiteiten.csv', [['Datum', 'Uur', 'Activiteit', 'Duur (min)', 'Vertrek', 'Georganiseerd door', 'Gezien door', 'Doe mee getikt', 'Totaal deelnemers', 'Conversie %'], ...D.perAct.map((r) => [r.a.date, r.a.time, typeInfo(r.a).label, r.a.dur, r.a.place, D.realName(r.a.by), r.seen, r.joined, r.total, r.seen ? r.conv : ''])]); return; }
   if (act === 'pushon') {
-    el.disabled = true;
+    el.disabled = true; if (S.pushStep) { S.pushStep = null; ls.set('wb-push-asked', '1'); }
     try { S.pushOn = await pushSubscribe(true); toast(S.pushOn ? 'Meldingen staan aan op dit toestel.' : Notification.permission === 'denied' ? 'Meldingen zijn niet toegestaan. Je kunt ze aanzetten in de instellingen van je toestel.' : 'Meldingen aanzetten lukte niet.'); }
     catch (e) { console.error(e); toast('Meldingen aanzetten lukte niet op dit toestel.'); }
     render(); return;
@@ -1119,6 +1151,7 @@ async function handle(el) {
     location.replace(location.pathname + location.search); // opnieuw starten op het aanmeldscherm
     return;
   }
+  if (act === 'push-skip') { ls.set(S.pushStep === 'ios' ? 'wb-push-asked-ios' : 'wb-push-asked', '1'); S.pushStep = null; render(); toTop(); if (pushPossible()) toast('Je kunt meldingen later aanzetten in het tabblad Samen.'); return; }
   if (act === 'push-hide') { ls.set('wb-push-hidden', '1'); render(); toast('Je kunt meldingen later aanzetten in het tabblad Samen.'); return; }
   if (act === 'simulate') { S.tab = 'agenda'; render(); store.simulate(); return; }
   if (act === 'reset') { await store.reset(); S.detail = null; S.notifQ = []; S.reminded = new Set(); ls.set('wb-reminded', '[]'); showPop(); toast('Demo opnieuw gestart.'); return; }
@@ -1253,6 +1286,7 @@ async function boot() {
       S.ck = ls.get('wb-ck') || null; S.me = (S.ck && ls.get('wb-pid')) || null;
       S.mode = 'shared'; store = sharedStore(F, db); store.start();
       admStore = adminStore(A, F, Au, cfg);
+      S.pushStep = pushStepFor();
       render();
       trackOpen();
       // was dit toestel al aangemeld als beheerder? dan meteen terug in het dashboard
