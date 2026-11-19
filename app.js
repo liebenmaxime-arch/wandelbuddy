@@ -421,13 +421,19 @@ function together() {
 }
 
 // ---------- meldingen ----------
+// Meldingsteksten die voor ELKE activiteit taalkundig kloppen (ook "Padel", "MMA" of een zelf getypte sport):
+// de activiteit staat vooraan, met hoofdletter, en wordt nooit achter "gaat" gezet.
+const cap = (s) => (s ? String(s).charAt(0).toUpperCase() + String(s).slice(1) : '');
+const minTxt = (n) => `${n} ${n === 1 ? 'minuut' : 'minuten'}`;
+const msgNew = (a) => ({ title: `${cap(typeInfo(a).label)} met ${realName(a.by)}`, body: `${cap(dayLabel(a.date))} om ${hhmm(a.time)} · ${a.dur} min · vertrek: ${a.place}` });
+const msgRemind = (a, n) => ({ title: `${cap(typeInfo(a).label)} begint over ${minTxt(n)}`, body: `Om ${hhmm(a.time)} · vertrek: ${a.place} · terug om ${fromMin(toMin(a.time) + a.dur)}` });
 function notify(a) {
   if (S.notifQ.some((q) => q.id === a.id && q.kind === 'new')) return;
   S.notifQ.push({ id: a.id, kind: 'new' }); showPop(); chime();
   try { if (navigator.vibrate) navigator.vibrate([120, 60, 120]); } catch (e) {}
   if (document.hidden) {
     document.title = '🔔 Nieuwe activiteit · ' + BASE_TITLE;
-    try { if ('Notification' in window && Notification.permission === 'granted') new Notification(`${realName(a.by)} gaat ${typeInfo(a).label.toLowerCase()}`, { body: `${dayLabel(a.date)} om ${hhmm(a.time)} · ${a.place}`, tag: a.id }); } catch (e) {}
+    try { if ('Notification' in window && Notification.permission === 'granted') { const m = msgNew(a); new Notification(m.title, { body: m.body, tag: a.id }); } } catch (e) {}
   }
   store.track('notif_shown', { act: a.id });
 }
@@ -437,11 +443,12 @@ function showPop() {
   const t = typeInfo(a); const g = goingOf(a.id); const more = S.notifQ.length - 1;
   if (q.kind === 'remind') {
     const mins = Math.max(1, Math.ceil(toMin(a.time) - (new Date().getHours() * 60 + new Date().getMinutes())));
+    const m = msgRemind(a, mins);
     w.innerHTML = `<div class="pop" role="alertdialog" aria-labelledby="poptitle">
       <div class="bell">⏰ Herinnering${more > 0 ? ` · nog ${more}` : ''}</div>
       <div class="ptop"><div class="ticon" style="background:${t.color}">${t.icon}</div>
-        <div><b id="poptitle" style="font-size:17px">Over ${mins} ${mins === 1 ? 'minuut' : 'minuten'}: ${esc(t.label.toLowerCase())}</b>
-        <div class="muted small">Om ${hhmm(a.time)} · vertrek aan ${esc(a.place)} · terug om ${fromMin(toMin(a.time) + a.dur)}</div></div></div>
+        <div><b id="poptitle" style="font-size:17px">${esc(m.title)}</b>
+        <div class="muted small">${esc(m.body)}</div></div></div>
       <div class="cgoing">${avatars(g.map((j) => j.uid))}${g.length === 1 ? 'Jij gaat' : g.length + ' mensen gaan mee'}</div>
       <div class="pbtns"><button class="primary" type="button" data-pop="open" style="grid-column:auto">Bekijk</button><button class="secondary" type="button" data-pop="cancel" style="color:#B3402A">Ik kan toch niet</button></div></div>`;
     w.hidden = false; return;
@@ -449,8 +456,8 @@ function showPop() {
   w.innerHTML = `<div class="pop" role="alertdialog" aria-labelledby="poptitle">
     <div class="bell">🔔 Nieuwe activiteit${more > 0 ? ` · nog ${more}` : ''}</div>
     <div class="ptop"><div class="ticon" style="background:${t.color}">${t.icon}</div>
-      <div><b id="poptitle" style="font-size:17px">${esc(realName(a.by))} gaat ${esc(t.label.toLowerCase())}</b>
-      <div class="muted small">${esc(dayLabel(a.date))} om ${hhmm(a.time)} · ${a.dur} min · vertrek: ${esc(a.place)}</div></div></div>
+      <div><b id="poptitle" style="font-size:17px">${esc(msgNew(a).title)}</b>
+      <div class="muted small">${esc(msgNew(a).body)}</div></div></div>
     ${a.note ? `<p class="small">${esc(a.note)}</p>` : ''}
     <div class="cgoing">${avatars(g.map((j) => j.uid))}${g.length === 1 ? '1 doet mee' : g.length + ' doen mee'}</div>
     <div class="pbtns"><button class="primary" type="button" data-pop="join">Ik ga mee</button>
@@ -1220,7 +1227,7 @@ function checkReminders() {
       S.reminded.add(a.id); ls.set('wb-reminded', JSON.stringify([...S.reminded].slice(-200)));
       S.notifQ.push({ id: a.id, kind: 'remind' }); showPop(); chime();
       try { if (navigator.vibrate) navigator.vibrate([200, 80, 200]); } catch (e) {}
-      if (document.hidden) { document.title = '⏰ Over ' + left + ' min · ' + BASE_TITLE; try { if ('Notification' in window && Notification.permission === 'granted') new Notification(`Over ${left} minuten: ${typeInfo(a).label.toLowerCase()}`, { body: `Vertrek aan ${a.place}`, tag: 'r' + a.id }); } catch (e) {} }
+      if (document.hidden) { document.title = '⏰ Over ' + left + ' min · ' + BASE_TITLE; try { if ('Notification' in window && Notification.permission === 'granted') { const m = msgRemind(a, left); new Notification(m.title, { body: m.body, tag: 'r' + a.id }); } } catch (e) {} }
       store.track('reminder_shown', { act: a.id });
     }
   }

@@ -17,7 +17,7 @@
 const PROJECT = 'wandelbuddy-9c08c';
 const API_KEY = 'AIzaSyAZvONuUmHcZpHdAqp0t8EZJh96SYlIPDI'; // publieke Firebase web-sleutel
 const ROBOT_EMAIL = 'robot@wandelbuddy-9c08c.firebaseapp.com';
-const APP_URL = 'https://liebenmaxime-arch.github.io/wandelbuddy/';
+const APP_URL = 'https://comove.pages.dev/';
 const TZ = 'Europe/Brussels';
 const DB = `https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/(default)/documents`;
 const LABELS = { wandelen: 'Wandelen', lopen: 'Lopen', padel: 'Padel', fietsen: 'Fietsen', stretch: 'Yoga' };
@@ -177,7 +177,10 @@ async function deliver(env, c, subs, message, vapid, budget) {
   return sent;
 }
 async function nameOf(env, c, pid) { const u = await getDoc(env, `/companies/${c}/users/${pid}`); return (u && u.name) || 'Een collega'; }
-const labelOf = (a) => a.label || LABELS[a.type] || 'Sporten';
+const labelOf = (a) => a.label || LABELS[a.type] || 'Sport';
+// taalkundig correct voor elke activiteit: de activiteit vooraan met hoofdletter, nooit achter "gaat"
+const cap = (s) => (s ? String(s).charAt(0).toUpperCase() + String(s).slice(1) : '');
+const minTxt = (n) => `${n} ${n === 1 ? 'minuut' : 'minuten'}`;
 
 // nieuwe activiteit → melding naar elke collega met meldingen aan (niet naar de organisator).
 // Per persoon bijgehouden: wie deze keer buiten de grens valt, krijgt de melding de minuut erna.
@@ -193,7 +196,7 @@ async function newActivities(env, c, now, vapid, budget, cache) {
     budget.log.push({ c, stap: 'nieuwe activiteit', act: a.id, personen: todo.length });
     if (!todo.length) continue;
     const who = await nameOf(env, c, a.by);
-    const msg = { title: `${who} gaat ${labelOf(a).toLowerCase()}`, body: `${dayLabel(a.date, now.date)} om ${hhmm(a.time)} · ${a.dur} min · vertrek: ${a.place}`, tag: a.id, url: `./#a=${a.id}` };
+    const msg = { title: `${cap(labelOf(a))} met ${who}`, body: `${cap(dayLabel(a.date, now.date))} om ${hhmm(a.time)} · ${a.dur} min · vertrek: ${a.place}`, tag: a.id, url: `./#a=${a.id}` };
     for (const p of todo) sent += await deliver(env, c, byPid.get(p), msg, vapid, budget);
   }
   return sent;
@@ -211,7 +214,7 @@ async function reminders(env, c, now, vapid, budget, cache) {
     const todo = await claimBatch(env, c, 'r_' + a.id, joined, byPid, budget);
     if (!todo.length) continue;
     budget.log.push({ c, stap: 'herinnering', act: a.id, minuten: left, personen: todo.length });
-    const msg = { title: `Over ${left} ${left === 1 ? 'minuut' : 'minuten'}: ${labelOf(a).toLowerCase()}`, body: `Om ${hhmm(a.time)} · vertrek aan ${a.place}`, tag: 'r' + a.id, url: `./#a=${a.id}` };
+    const msg = { title: `${cap(labelOf(a))} begint over ${minTxt(left)}`, body: `Om ${hhmm(a.time)} · vertrek: ${a.place}`, tag: 'r' + a.id, url: `./#a=${a.id}` };
     for (const p of todo) sent += await deliver(env, c, byPid.get(p), msg, vapid, budget);
   }
   return sent;

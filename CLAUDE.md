@@ -11,7 +11,7 @@ Webapp waarin collega's een middagwandeling of andere activiteit plannen. Andere
 - Lokale map: `~/Desktop/wandelbuddy-app`
 - Repository (op Maximes eigen GitHub-account `liebenmaxime-arch`): `liebenmaxime-arch/wandelbuddy`, branch `main`.
 - **Online via Cloudflare Pages op `https://comove.pages.dev`** (project "comove", gekoppeld aan de repository: elke push naar `main` wordt automatisch online gezet, geen build-stap, output directory = hoofdmap). Cloudflare stuurt `/index.html` door naar `/` (308), dus nooit `index.html` apart in de service worker bewaren.
-- Het vroegere adres `https://liebenmaxime-arch.github.io/wandelbuddy/` (GitHub Pages) wordt uitgezet zodra Maxime is overgestapt.
+- Het vroegere adres `https://liebenmaxime-arch.github.io/wandelbuddy/` (GitHub Pages) is uitgezet op 19 nov 2026 (geeft 404). Opnieuw aanzetten kan met `gh api -X POST repos/liebenmaxime-arch/wandelbuddy/pages -f "source[branch]=main" -f "source[path]=/"`.
 - In `push-worker/worker.js` staat `APP_URL` nog op het oude adres: dat is alleen het contactadres in de VAPID-handtekening (moet niet bereikbaar zijn). Bij de volgende keer dat de Worker opnieuw geplakt wordt, mag het naar `https://comove.pages.dev/`.
 - Oude repository `walkingbuddybe/wandelbuddy` (https://walkingbuddybe.github.io/wandelbuddy/): Maxime heeft geen toegang meer tot dat account. Niet naar pushen; die link blijft de oude versie tonen.
 - GitHub CLI staat in `~/.local/bin/gh` (niet in PATH). Ingelogd als `liebenmaxime-arch`.
