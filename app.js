@@ -740,6 +740,16 @@ function parseTime(s) {
   if (m) { h = Number(m[1]); mi = Number(m[2]); } else if ((m = /^(\d{1,2})(u|h|uur)?$/.exec(t))) { h = Number(m[1]); mi = 0; } else return null;
   return h > 23 || mi > 59 ? null : `${pad(h)}:${pad(mi)}`;
 }
+// "Ander uur" tijdens het typen: alleen cijfers, de : komt er vanzelf bij (1340 → 13:40, 9 → 09:)
+function timeMask(v, inputType) {
+  const n = String(v || '').replace(/\D/g, '').slice(0, 4);
+  if (!n) return '';
+  const one = n[0] > '2' || (n.length >= 2 && n[0] === '2' && n[1] > '3'); // 9, 7… of 25 → uur met één cijfer
+  const h = one ? '0' + n[0] : n.slice(0, 2); const m = (one ? n.slice(1) : n.slice(2)).slice(0, 2);
+  if (h.length < 2) return h;
+  if (m) return `${h}:${m}`;
+  return String(inputType || '').startsWith('delete') ? h : `${h}:`; // bij wissen de : niet opnieuw toevoegen
+}
 // "45", "45 min", "90min" → 45 / 90; buiten 5–240 → null
 function parseDur(s) { const m = /^(\d{1,3})(m|min|minuten)?$/.exec(String(s || '').trim().toLowerCase().replace(/\s+/g, '')); const n = m ? Number(m[1]) : NaN; return n >= 5 && n <= 240 ? n : null; }
 const draftType = (d) => typeInfo(d.type === 'sport' ? { type: 'sport', label: d.label } : d);
@@ -768,7 +778,7 @@ function vCreate() {
     <div class="field"><span>Wanneer</span><div class="chips">${days.map((s) => chip('date', s, esc(shortDay(s)), d.date === s)).join('')}
       <button type="button" class="chip" data-act="date-open" aria-pressed="${otherDate}">${CAL_I}${otherDate ? esc(longDay(d.date)) : 'Andere datum'}</button></div></div>
     <div class="field"><span>Hoe laat</span><div class="chips">${TIMES.map((x) => chip('time', x, hhmm(x), !d.timeText && d.time === x)).join('')}
-      ${other('ctime', 'Ander uur', d.timeText, d.timeBad, 'bv. 13:40', 'text', 6)}</div></div>
+      ${other('ctime', 'Ander uur', d.timeText, d.timeBad, 'bv. 13:40', 'numeric', 5)}</div></div>
     <div class="field"><span>Hoe lang</span><div class="chips">${t.durs.map((x) => chip('dur', x, x + ' min', !d.durText && d.dur === x)).join('')}
       ${other('cdur', 'Andere duur', d.durText, d.durBad, '5–240', 'numeric', 3, '<span class="unit">min</span>')}</div></div>
     <div class="field"><span>Vertrekpunt</span><div class="chips">${PLACES.map((x) => chip('place', x, x, !d.placeText && d.place === x)).join('')}</div>
@@ -1235,6 +1245,7 @@ document.addEventListener('click', (e) => { if (e.target.id === 'sheet') closeSh
 document.addEventListener('input', (e) => {
   if (e.target.id === 'creward') { const p = $('#rprev'); if (p) p.innerHTML = rewardPreview(e.target.value); return; }
   if (e.target.id === 'sportq' && S.sheet) { S.sheet.q = e.target.value; const l = $('#sportlist'); if (l) { l.innerHTML = sportListHtml(S.sheet.q); l.scrollTop = 0; } return; }
+  if (e.target.id === 'ctime') e.target.value = timeMask(e.target.value, e.inputType);
   if (draftInput(e.target.id, e.target.value)) return;
   const k = { wfirst: 'first', wlast: 'last', wcomp: 'company' }[e.target.id]; if (!k) return;
   S.signup = { ...(S.signup || {}), [k]: e.target.value };
