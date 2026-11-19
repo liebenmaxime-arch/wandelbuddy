@@ -1,4 +1,6 @@
-# Wandelbuddy
+# CoMove (vroeger Wandelbuddy)
+
+De app heet voor gebruikers **CoMove** (titel, welkomscherm, icoon, meldingen). Interne namen blijven "wandelbuddy" (repository, map, Firebase-project, Worker, localStorage-sleutels `wb-*`): niet hernoemen, anders raken gebruikers hun aanmelding kwijt.
 
 Schoolproject. Maxime is geen programmeur: praat en leg alles uit in eenvoudig Nederlands, werk stap voor stap, en vraag akkoord vóór je iets online zet.
 
@@ -7,11 +9,14 @@ Webapp waarin collega's een middagwandeling of andere activiteit plannen. Andere
 
 ## Waar alles staat
 - Lokale map: `~/Desktop/wandelbuddy-app`
-- Nieuwe repository (op Maximes eigen GitHub-account `liebenmaxime-arch`): `liebenmaxime-arch/wandelbuddy`, branch `main`, online via GitHub Pages op `https://liebenmaxime-arch.github.io/wandelbuddy/`.
+- Repository (op Maximes eigen GitHub-account `liebenmaxime-arch`): `liebenmaxime-arch/wandelbuddy`, branch `main`.
+- **Online via Cloudflare Pages op `https://comove.pages.dev`** (project "comove", gekoppeld aan de repository: elke push naar `main` wordt automatisch online gezet, geen build-stap, output directory = hoofdmap). Cloudflare stuurt `/index.html` door naar `/` (308), dus nooit `index.html` apart in de service worker bewaren.
+- Het vroegere adres `https://liebenmaxime-arch.github.io/wandelbuddy/` (GitHub Pages) wordt uitgezet zodra Maxime is overgestapt.
+- In `push-worker/worker.js` staat `APP_URL` nog op het oude adres: dat is alleen het contactadres in de VAPID-handtekening (moet niet bereikbaar zijn). Bij de volgende keer dat de Worker opnieuw geplakt wordt, mag het naar `https://comove.pages.dev/`.
 - Oude repository `walkingbuddybe/wandelbuddy` (https://walkingbuddybe.github.io/wandelbuddy/): Maxime heeft geen toegang meer tot dat account. Niet naar pushen; die link blijft de oude versie tonen.
 - GitHub CLI staat in `~/.local/bin/gh` (niet in PATH). Ingelogd als `liebenmaxime-arch`.
 
-## Bestanden (geen build-stap, relatieve paden, werkt op GitHub Pages)
+## Bestanden (geen build-stap, relatieve paden)
 - `index.html`: de pagina zelf (kop, navigatie, pop-up).
 - `styles.css`: alle opmaak.
 - `app.js`: alle logica (ES-module).

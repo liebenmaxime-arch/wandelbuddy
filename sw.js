@@ -1,10 +1,10 @@
-// Wandelbuddy service worker
+// CoMove (Wandelbuddy) service worker
 // - De app-bestanden worden altijd eerst vers van de server gehaald (zo zie je meteen de nieuwste versie);
 //   zonder internet valt hij terug op de bewaarde kopie.
 // - De Firebase-bibliotheek (vaste versie) wordt bewaard, zodat de app sneller opent.
 // - Gegevens uit de database (Firestore) gaan nooit via deze cache.
-const CACHE = 'wandelbuddy-v4';
-const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'firebase-config.js', 'push-config.js', 'sports.js', 'rewards.js', 'manifest.json', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
+const CACHE = 'wandelbuddy-v5';
+const SHELL = ['./', 'styles.css', 'app.js', 'firebase-config.js', 'push-config.js', 'sports.js', 'rewards.js', 'manifest.json', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -26,7 +26,7 @@ self.addEventListener('fetch', (e) => {
     e.respondWith(
       fetch(req.url, { cache: 'no-cache', credentials: 'same-origin' })
         .then((res) => { if (res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); } return res; })
-        .catch(() => caches.match(req, { ignoreSearch: true }).then((r) => r || caches.match('index.html')))
+        .catch(() => caches.match(req, { ignoreSearch: true }).then((r) => r || caches.match('./')))
     );
     return;
   }
@@ -45,7 +45,7 @@ self.addEventListener('fetch', (e) => {
 self.addEventListener('push', (e) => {
   let d = {};
   try { d = e.data ? e.data.json() : {}; } catch (x) { d = { body: e.data ? e.data.text() : '' }; }
-  e.waitUntil(self.registration.showNotification(d.title || 'Wandelbuddy', {
+  e.waitUntil(self.registration.showNotification(d.title || 'CoMove', {
     body: d.body || '', tag: d.tag || undefined, renotify: !!d.tag, icon: 'icons/icon-192.png', badge: 'icons/icon-192.png',
     data: { url: d.url || './' },
   }));

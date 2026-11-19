@@ -1,4 +1,4 @@
-// Wandelbuddy · app
+// CoMove (Wandelbuddy) · app
 // De koppeling met Firebase staat in firebase-config.js.
 import { firebaseConfig } from './firebase-config.js';
 import { pushConfig } from './push-config.js';
@@ -468,17 +468,17 @@ const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.p
 const isAndroid = () => /Android/i.test(navigator.userAgent);
 let installEvt = null; // Android/Chrome: hiermee kan de app zelf de installeervraag tonen
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; if (S.mode !== 'loading') refresh(); });
-window.addEventListener('appinstalled', () => { installEvt = null; ls.set('wb-install-hidden', '1'); toast('Wandelbuddy staat nu op je beginscherm.'); if (S.mode !== 'loading') refresh(); });
+window.addEventListener('appinstalled', () => { installEvt = null; ls.set('wb-install-hidden', '1'); toast('CoMove staat nu op je beginscherm.'); if (S.mode !== 'loading') refresh(); });
 if ('serviceWorker' in navigator && /^https?:/.test(location.protocol)) navigator.serviceWorker.register('sw.js').catch((e) => console.warn('service worker', e));
 const SHARE_ICON = '<svg class="inl" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M8 7l4-4 4 4"/><path d="M6 11v9h12v-9"/></svg>';
 function installHtml(withLater) {
   if (isStandalone()) return '';
   const os = S.installOs || (isAndroid() ? 'android' : 'ios');
   const ios = `<ol class="steps"><li>Open deze pagina in <b>Safari</b>.</li><li>Tik onderaan op de knop <b>Deel</b> ${SHARE_ICON} (vierkantje met een pijl omhoog).</li><li>Scrol naar beneden en tik op <b>Zet op beginscherm</b>.</li><li>Tik rechtsboven op <b>Voeg toe</b>.</li></ol>`;
-  const android = (installEvt ? '<button class="primary" type="button" data-act="install">Installeer Wandelbuddy</button><p class="small muted">Lukt dat niet? Doe het dan zo:</p>' : '')
+  const android = (installEvt ? '<button class="primary" type="button" data-act="install">Installeer CoMove</button><p class="small muted">Lukt dat niet? Doe het dan zo:</p>' : '')
     + '<ol class="steps"><li>Open deze pagina in <b>Chrome</b>.</li><li>Tik rechtsboven op de drie puntjes <b>⋮</b>.</li><li>Tik op <b>App installeren</b> of <b>Toevoegen aan startscherm</b>.</li><li>Bevestig met <b>Installeren</b>.</li></ol>';
   return `<div class="box install">
-    <div class="row" style="justify-content:space-between;flex-wrap:nowrap"><b>Zet Wandelbuddy op je beginscherm</b>${withLater ? '<button class="linkbtn" type="button" data-act="install-hide">Later</button>' : ''}</div>
+    <div class="row" style="justify-content:space-between;flex-wrap:nowrap"><b>Zet CoMove op je beginscherm</b>${withLater ? '<button class="linkbtn" type="button" data-act="install-hide">Later</button>' : ''}</div>
     <p class="small muted">Dan open je de app met één tik, zonder adresbalk, net als een gewone app.</p>
     <div class="chips" role="group" aria-label="Toestel"><button type="button" class="chip" data-installos="ios" aria-pressed="${os === 'ios'}">iPhone</button><button type="button" class="chip" data-installos="android" aria-pressed="${os === 'android'}">Android</button></div>
     ${os === 'ios' ? ios : android}
@@ -511,9 +511,9 @@ function pushCard() {
 }
 function pushSettingsHtml() {
   if (S.mode !== 'shared' || !pushConfig.vapidPublicKey) return '';
-  if (isIOS() && !isStandalone()) return '<p class="note">Meldingen op je iPhone: zet Wandelbuddy eerst op je beginscherm (vanaf iOS 16.4), open de app van daaruit en zet ze dan hier aan.</p>';
+  if (isIOS() && !isStandalone()) return '<p class="note">Meldingen op je iPhone: zet CoMove eerst op je beginscherm (vanaf iOS 16.4), open de app van daaruit en zet ze dan hier aan.</p>';
   if (!pushSupported()) return '<p class="note">Deze browser kan geen meldingen tonen als de app dicht is. In de app zelf krijg je ze wel.</p>';
-  if (Notification.permission === 'denied') return '<p class="note">Meldingen zijn geblokkeerd voor Wandelbuddy. Zet ze aan in de instellingen van je toestel.</p>';
+  if (Notification.permission === 'denied') return '<p class="note">Meldingen zijn geblokkeerd voor CoMove. Zet ze aan in de instellingen van je toestel.</p>';
   if (S.pushOn) return '<div class="status ok">✓ Meldingen staan aan op dit toestel</div>';
   return `<button class="secondary" type="button" data-act="pushon">Zet meldingen aan</button><p class="note" style="margin-top:-8px">${PUSH_WHAT}</p>`;
 }
@@ -559,7 +559,7 @@ function card(a) {
     <div>${btn}</div></div>`;
 }
 function banner() {
-  if (S.denied) return `<div class="banner"><b>Database geeft geen toegang</b>Vernieuw de pagina. Lukt het dan nog niet, laat het weten aan het Wandelbuddy-team.</div>`;
+  if (S.denied) return `<div class="banner"><b>Database geeft geen toegang</b>Vernieuw de pagina. Lukt het dan nog niet, laat het weten aan het CoMove-team.</div>`;
   if (S.offline) return `<div class="banner"><b>Geen verbinding</b>De activiteiten zijn nog niet geladen. Wat je ziet, is misschien niet actueel.</div>`;
   return '';
 }
@@ -589,7 +589,7 @@ function vWelcome() {
   const f = S.signup || (S.signup = { first: '', last: '', company: '' });
   return `<div class="welcome">
     <div class="logo">${ICON.wandelen}</div>
-    <div><h1>Welkom bij Wandelbuddy</h1>
+    <div><h1>Welkom bij CoMove</h1>
       <p class="muted" style="margin-top:6px">Plan een middagwandeling of zie wie er vandaag gaat, en doe met één tik mee. Vul je naam en je bedrijf in, een wachtwoord is niet nodig.</p></div>
     <label class="field"><span>Voornaam</span><input class="text" id="wfirst" type="text" maxlength="30" autocomplete="given-name" autocapitalize="words" placeholder="bv. Sarah" value="${esc(f.first)}"></label>
     <label class="field"><span>Achternaam</span><input class="text" id="wlast" type="text" maxlength="40" autocomplete="family-name" autocapitalize="words" placeholder="bv. Peeters" value="${esc(f.last)}"></label>
@@ -1071,7 +1071,7 @@ async function handle(el) {
   if (act === 'del') { if (!S.confirmDel) { S.confirmDel = true; render(); return; } try { await store.remove(S.detail); S.detail = null; S.confirmDel = false; render(); toast('Activiteit verwijderd.'); } catch (e) {} return; }
   if (act === 'share') {
     const a = actById(S.detail); const t = typeInfo(a); const link = /^https?:/.test(location.href) ? ' ' + location.href.split('#')[0] : '';
-    const txt = `${t.label} ${dayLabel(a.date).toLowerCase()} om ${hhmm(a.time)}, ${a.dur} min, vertrek: ${a.place}.${a.note ? ' ' + a.note + '.' : ''} Wie doet mee? Zet je erbij in Wandelbuddy:${link}`;
+    const txt = `${t.label} ${dayLabel(a.date).toLowerCase()} om ${hhmm(a.time)}, ${a.dur} min, vertrek: ${a.place}.${a.note ? ' ' + a.note + '.' : ''} Wie doet mee? Zet je erbij in CoMove:${link}`;
     try { await navigator.clipboard.writeText(txt); toast('Uitnodiging gekopieerd.'); } catch (e) { toast(txt); }
     return;
   }
@@ -1095,8 +1095,8 @@ async function handle(el) {
     return;
   }
   if (act === 'admlogout') { await admStore.logout(); S.admin = null; S.tab = 'samen'; history.replaceState(null, '', location.pathname + location.search); render(); toast('Je bent afgemeld als beheerder.'); return; }
-  if (act === 'csv-users') { const D = dashData(); csvDownload('wandelbuddy-testers.csv', [['Naam', 'Bedrijf', 'Keer geopend', 'Activiteiten gezien', 'Doe mee getikt', 'Zelf gepland', 'Stappen', 'Beweegminuten'], ...D.perUser.map((r) => [r.name, r.company, r.opens, r.seen, r.joined, r.planned, r.steps, r.minutes])]); return; }
-  if (act === 'csv-acts') { const D = dashData(); csvDownload('wandelbuddy-activiteiten.csv', [['Datum', 'Uur', 'Activiteit', 'Duur (min)', 'Vertrek', 'Georganiseerd door', 'Gezien door', 'Doe mee getikt', 'Totaal deelnemers', 'Conversie %'], ...D.perAct.map((r) => [r.a.date, r.a.time, typeInfo(r.a).label, r.a.dur, r.a.place, D.realName(r.a.by), r.seen, r.joined, r.total, r.seen ? r.conv : ''])]); return; }
+  if (act === 'csv-users') { const D = dashData(); csvDownload('comove-testers.csv', [['Naam', 'Bedrijf', 'Keer geopend', 'Activiteiten gezien', 'Doe mee getikt', 'Zelf gepland', 'Stappen', 'Beweegminuten'], ...D.perUser.map((r) => [r.name, r.company, r.opens, r.seen, r.joined, r.planned, r.steps, r.minutes])]); return; }
+  if (act === 'csv-acts') { const D = dashData(); csvDownload('comove-activiteiten.csv', [['Datum', 'Uur', 'Activiteit', 'Duur (min)', 'Vertrek', 'Georganiseerd door', 'Gezien door', 'Doe mee getikt', 'Totaal deelnemers', 'Conversie %'], ...D.perAct.map((r) => [r.a.date, r.a.time, typeInfo(r.a).label, r.a.dur, r.a.place, D.realName(r.a.by), r.seen, r.joined, r.total, r.seen ? r.conv : ''])]); return; }
   if (act === 'pushon') {
     el.disabled = true;
     try { S.pushOn = await pushSubscribe(true); toast(S.pushOn ? 'Meldingen staan aan op dit toestel.' : Notification.permission === 'denied' ? 'Meldingen zijn niet toegestaan. Je kunt ze aanzetten in de instellingen van je toestel.' : 'Meldingen aanzetten lukte niet.'); }
