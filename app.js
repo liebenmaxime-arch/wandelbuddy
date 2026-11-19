@@ -698,7 +698,7 @@ function vDetail() {
   if (!a) { if (S.mode === 'shared' && !S.loadedActs) return '<p class="loading">Activiteit laden…</p>'; S.detail = null; return vAgenda(); }
   const t = typeInfo(a); const g = goingOf(a.id); const joined = iJoined(a.id); const past = isPast(a); const isMine = a.by === S.me;
   const max = a.max || t.max; const full = max && g.length >= max && !joined;
-  const ppl = g.map((j) => `<div class="person"><div class="av" style="background:${colorFor(j.uid)}">${face(j.uid, nameOf(j.uid))}</div><div><b>${esc(nameOf(j.uid))}</b>${badgeTag(j.uid)}<small>${j.uid === a.by ? 'organiseert' : 'doet mee'}${past && stepsOf(j) ? ' · ' + fmtN(stepsOf(j)) + ' stappen' : ''}</small></div></div>`).join('');
+  const ppl = g.map((j) => `<button type="button" class="person" data-act="person" data-uid="${esc(j.uid)}"><div class="av" style="background:${colorFor(j.uid)}">${face(j.uid, nameOf(j.uid))}</div><div class="grow"><b>${esc(nameOf(j.uid))}</b>${badgeTag(j.uid)}<small>${j.uid === a.by ? 'organiseert' : 'doet mee'}${past && stepsOf(j) ? ' · ' + fmtN(stepsOf(j)) + ' stappen' : ''}</small></div><span class="chev" aria-hidden="true">›</span></button>`).join('');
   let actions = '';
   if (!past) {
     if (isMine) actions = `<button class="secondary" type="button" data-act="share">Kopieer uitnodiging</button>`;
@@ -726,6 +726,23 @@ function vDetail() {
     ${steps}
     <h2>Wie doet er mee</h2><div class="people">${ppl || '<p class="muted small">Nog niemand.</p>'}</div>
     ${actions}${del}`;
+}
+// profiel van een collega (tik op een naam bij "Wie doet er mee")
+function vPerson() {
+  const uid = S.person; const u = S.users[uid] || {}; const s = statsFor(uid); const got = earnedBadges(uid);
+  const name = realName(uid); const first = uid === S.me ? 'Jij' : (u.first || name.split(' ')[0]);
+  const earned = BADGES.filter((b) => got.has(b.id));
+  return `<button class="back" type="button" data-act="person-back">‹ Terug</button>
+    <div class="me-row"><div class="av av-lg" style="background:${colorFor(uid)};cursor:default">${face(uid, name)}</div>
+      <div class="grow"><b>${esc(name)}</b><small class="muted" style="display:block">${esc(u.company || '')}</small></div></div>
+    <div class="stats">
+      <div class="stat"><b>${s.led}</b><small>${s.led === 1 ? 'activiteit' : 'activiteiten'} gepland</small></div>
+      <div class="stat"><b>${s.done}</b><small>keer meegedaan</small></div>
+      <div class="stat"><b>${got.size}</b><small>${got.size === 1 ? 'badge' : 'badges'}</small></div>
+    </div>
+    <h2>Badges <span class="muted small" style="font-weight:700">· ${got.size} van ${BADGES.length} behaald</span></h2>
+    ${earned.length ? `<div class="badges">${earned.map((b) => `<div class="badge on"><div class="medal" aria-hidden="true">${b.icon}</div><div><b>${esc(b.name)}</b><span>${esc(b.how)}</span></div></div>`).join('')}</div>`
+      : `<p class="muted small">${esc(first)} ${uid === S.me ? 'hebt' : 'heeft'} nog geen badges. Samen bewegen helpt!</p>`}`;
 }
 function draftDays() { const out = []; for (let n = 0; out.length < 5 && n < 14; n++) { const x = addDays(new Date(), n); const w = x.getDay(); if (w !== 0 && w !== 6) out.push(ymd(x)); } return out; }
 // ---------- een activiteit plannen ----------
@@ -1009,7 +1026,7 @@ function csvDownload(name, rows) {
 
 // ---------- render ----------
 let lastKey = '';
-const viewKey = () => (needsWelcome() ? (S.claim ? 'claim' : 'welcome') : S.pushStep ? 'push' : S.draft ? 'draft' : S.detail ? 'detail:' + S.detail : 'tab:' + S.tab);
+const viewKey = () => (needsWelcome() ? (S.claim ? 'claim' : 'welcome') : S.pushStep ? 'push' : S.draft ? 'draft' : S.person ? 'person:' + S.person : S.detail ? 'detail:' + S.detail : 'tab:' + S.tab);
 const needsWelcome = () => S.mode === 'shared' && !S.me;
 function render(preserve = false) {
   if (S.mode === 'loading') return;
@@ -1024,6 +1041,7 @@ function render(preserve = false) {
   if (needsWelcome()) html = vWelcome();
   else if (S.pushStep) html = vPushStep();
   else if (S.draft) html = vCreate();
+  else if (S.person && S.users[S.person]) html = vPerson();
   else if (S.detail) html = vDetail();
   else html = S.tab === 'samen' ? vSamen() : S.tab === 'dash' ? (S.mode === 'local' || S.admin ? vDash() : vAdminLogin()) : vAgenda();
   main.innerHTML = html;
@@ -1048,6 +1066,7 @@ const refresh = () => render(true);
 // ---------- events ----------
 async function handle(el) {
   if (el.dataset.tab || el.dataset.open || el.dataset.act === 'new') S.justAdded = null;
+  if (el.dataset.tab || el.dataset.open || el.dataset.pop || el.dataset.act === 'new' || el.dataset.act === 'home') S.person = null;
   if (el.dataset.pop) {
     const q = S.notifQ.shift() || {}; const id = q.id; const k = el.dataset.pop;
     if (k === 'ok' && id) store.track('reminder_ok', { act: id });
@@ -1084,6 +1103,8 @@ async function handle(el) {
   }
   if (el.dataset.cal && S.draft) { S.draft.date = el.dataset.cal; closeSheet(); render(); return; }
   const act = el.dataset.act;
+  if (act === 'person') { S.person = el.dataset.uid; render(); toTop(); return; }
+  if (act === 'person-back') { S.person = null; render(); toTop(); return; }
   if (act === 'home') { S.detail = null; S.draft = null; render(); return; }
   if (act === 'new') { S.draft = newDraft(); S.detail = null; render(); toTop(); return; }
   if (act === 'sport-open') { openSheet('sport'); return; }

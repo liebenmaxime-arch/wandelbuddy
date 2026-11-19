@@ -140,6 +140,10 @@ p { margin: 0; }
 .fact b { font-size: 15px; overflow-wrap: anywhere; }
 .people { display: flex; flex-direction: column; gap: 8px; }
 .person { display: flex; align-items: center; gap: 10px; }
+button.person { width: 100%; background: none; border: 0; padding: 4px 0; margin: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; border-radius: 12px; -webkit-tap-highlight-color: transparent; }
+button.person .grow { flex: 1; min-width: 0; }
+button.person .chev { color: var(--muted); font-size: 22px; line-height: 1; padding: 0 4px; }
+button.person:active { opacity: .7; }
 .av { width: 34px; height: 34px; border-radius: 50%; color: #fff; font-weight: 800; font-size: 13px; display: grid; place-items: center; flex: none; }
 .person small { color: var(--muted); display: block; }
 .status { border-radius: 12px; padding: 10px 12px; font-size: 13px; font-weight: 700; }
